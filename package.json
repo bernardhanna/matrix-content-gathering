@@ -1,0 +1,14 @@
+{
+  "name": "matrix-content-export",
+  "description": "Block screenshot capture for Matrix Content Export (Playwright).",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "postinstall": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

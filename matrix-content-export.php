@@ -1,0 +1,891 @@
+<?php
+/**
+ * Plugin Name: Matrix Content Export / Import
+ * Description: Export pages and flexi blocks (matrix-starter) to Excel (one sheet per page), CSV, or client doc. Select which pages and post types to include. Import CSV back to update content.
+ * Author: Bernard Hanna
+ * Version: 1.1.0
+ * Requires at least: 5.8
+ * Requires PHP: 7.4
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+define('MATRIX_EXPORT_DIR', plugin_dir_path(__FILE__));
+define('MATRIX_EXPORT_URL', plugin_dir_url(__FILE__));
+define('MATRIX_EXPORT_CLIENT_FORM_SLUG', 'content-editing');
+define('MATRIX_EXPORT_CLIENT_FORM_OPTION', 'matrix_export_client_form_post_ids');
+define('MATRIX_EXPORT_NOTIFY_EMAIL_OPTION', 'matrix_export_notify_email');
+define('MATRIX_EXPORT_ADMIN_DUPLICATE_NOTIFY_EMAIL_OPTION', 'matrix_export_admin_duplicate_notify_email');
+define('MATRIX_EXPORT_DISABLED_FORM_FIELDS_OPTION', 'matrix_export_disabled_form_fields');
+define('MATRIX_EXPORT_DISABLED_BLOCKS_OPTION', 'matrix_export_disabled_blocks');
+/** Max size for image uploads in the client form (bytes). Default 2 MB. */
+define('MATRIX_EXPORT_MAX_IMAGE_UPLOAD_BYTES', 2 * 1024 * 1024);
+/** Max size for video uploads in the client form (bytes). Default 30 MB. */
+define('MATRIX_EXPORT_MAX_VIDEO_UPLOAD_BYTES', 30 * 1024 * 1024);
+/** Post meta key for content-editing status (To do / In progress / Done / Delete). */
+define('MATRIX_EXPORT_STATUS_META_KEY', 'matrix_content_status');
+/** Post meta key for email of user who marked content as Done. */
+define('MATRIX_EXPORT_STATUS_DONE_BY_META_KEY', 'matrix_content_status_done_by');
+
+require_once MATRIX_EXPORT_DIR . 'includes/class-matrix-export.php';
+require_once MATRIX_EXPORT_DIR . 'includes/class-matrix-import.php';
+
+add_action('admin_menu', 'matrix_export_register_menu');
+add_action('admin_init', 'matrix_export_handle_actions');
+add_action('init', 'matrix_export_handle_client_form_submit', 5);
+add_action('wp_ajax_matrix_preview_progress', 'matrix_export_preview_progress');
+add_action('wp_ajax_matrix_export_save_page_status', 'matrix_export_ajax_save_page_status');
+add_action('wp_ajax_matrix_export_autosave_draft', 'matrix_export_ajax_autosave_draft');
+add_action('wp_ajax_matrix_export_duplicate_page', 'matrix_export_ajax_duplicate_page');
+add_action('wp_ajax_matrix_export_get_fields_for_posts', 'matrix_export_ajax_get_fields_for_posts');
+add_action('wp_enqueue_scripts', 'matrix_export_content_editing_scripts', 5);
+add_filter('manage_pages_columns', 'matrix_export_add_status_column');
+add_filter('manage_posts_columns', 'matrix_export_add_status_column');
+add_action('manage_pages_custom_column', 'matrix_export_show_status_column', 10, 2);
+add_action('manage_posts_custom_column', 'matrix_export_show_status_column', 10, 2);
+add_action('admin_head-edit.php', 'matrix_export_status_column_styles');
+add_action('template_redirect', 'matrix_export_render_content_editing_form', 1);
+add_action('wp_footer', 'matrix_export_form_saved_notice');
+add_filter('show_admin_bar', 'matrix_export_hide_admin_bar_on_content_editing', 99);
+
+/**
+ * Preview mode is used by embedded block iframes.
+ */
+function matrix_export_is_preview_request() {
+    return isset($_GET['matrix_preview']) && $_GET['matrix_preview'] === '1';
+}
+
+/**
+ * On the content-editing page, enqueue media so the editor "Add Media" button opens the modal instead of scrolling.
+ */
+function matrix_export_content_editing_scripts() {
+    if (!matrix_export_is_content_editing_url()) {
+        return;
+    }
+    if (function_exists('wp_enqueue_editor')) {
+        wp_enqueue_editor();
+    }
+    wp_enqueue_media();
+}
+
+/**
+ * Hide WP admin toolbar on client editing page.
+ */
+function matrix_export_hide_admin_bar_on_content_editing($show) {
+    if (matrix_export_is_content_editing_url() || matrix_export_is_preview_request()) {
+        return false;
+    }
+    return $show;
+}
+
+/**
+ * Clear cached block preview screenshots.
+ *
+ * @return int Number of deleted files.
+ */
+function matrix_export_clear_cached_previews() {
+    $uploads = wp_upload_dir();
+    if (empty($uploads['basedir'])) {
+        return 0;
+    }
+    $dir = trailingslashit($uploads['basedir']) . 'matrix-content-export-previews';
+    if (!is_dir($dir)) {
+        return 0;
+    }
+    $files = glob($dir . '/*.{jpg,jpeg,png,webp}', GLOB_BRACE);
+    if (!is_array($files) || empty($files)) {
+        return 0;
+    }
+    $deleted = 0;
+    foreach ($files as $file) {
+        if (is_file($file) && @unlink($file)) {
+            $deleted++;
+        }
+    }
+    return $deleted;
+}
+
+/**
+ * Clear cached previews for specific post IDs.
+ *
+ * @param array<int,int|string> $post_ids
+ * @return int Number of deleted files.
+ */
+function matrix_export_clear_cached_previews_for_posts(array $post_ids) {
+    $post_ids = array_values(array_unique(array_filter(array_map('intval', $post_ids))));
+    if (empty($post_ids)) {
+        return 0;
+    }
+    $uploads = wp_upload_dir();
+    if (empty($uploads['basedir'])) {
+        return 0;
+    }
+    $dir = trailingslashit($uploads['basedir']) . 'matrix-content-export-previews';
+    if (!is_dir($dir)) {
+        return 0;
+    }
+    $deleted = 0;
+    foreach ($post_ids as $pid) {
+        $files = glob($dir . '/' . $pid . '-*.{jpg,jpeg,png,webp}', GLOB_BRACE);
+        if (!is_array($files) || empty($files)) {
+            continue;
+        }
+        foreach ($files as $file) {
+            if (is_file($file) && @unlink($file)) {
+                $deleted++;
+            }
+        }
+    }
+    return $deleted;
+}
+
+/**
+ * Check if a flex/hero row index is disabled for a given post.
+ *
+ * @param int $post_id
+ * @param string $block_source e.g. flexible_content_blocks
+ * @param int $block_index Zero-based row index
+ * @return bool
+ */
+function matrix_export_is_block_disabled($post_id, $block_source, $block_index) {
+    $post_id = (int) $post_id;
+    $block_index = (int) $block_index;
+    if ($post_id <= 0 || $block_index < 0 || !is_string($block_source) || $block_source === '') {
+        return false;
+    }
+    $map = get_option(MATRIX_EXPORT_DISABLED_BLOCKS_OPTION, []);
+    if (!is_array($map) || empty($map[$post_id]) || empty($map[$post_id][$block_source]) || !is_array($map[$post_id][$block_source])) {
+        return false;
+    }
+    $disabled_indices = array_map('intval', $map[$post_id][$block_source]);
+    return in_array($block_index, $disabled_indices, true);
+}
+
+function matrix_export_register_menu() {
+    add_management_page(
+        'Matrix Content Gathering',
+        'Content Gathering',
+        'manage_options',
+        'matrix-content-export',
+        'matrix_export_render_page',
+        'dashicons-download',
+        61
+    );
+}
+
+function matrix_export_handle_actions() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    if (
+        isset($_POST['matrix_client_links_action_nonce'], $_POST['matrix_client_links_action']) &&
+        wp_verify_nonce($_POST['matrix_client_links_action_nonce'], 'matrix_client_links_action')
+    ) {
+        $action = sanitize_key(wp_unslash($_POST['matrix_client_links_action']));
+        if ($action === 'clear_one' && isset($_POST['matrix_client_link_token'])) {
+            $token = sanitize_text_field(wp_unslash($_POST['matrix_client_link_token']));
+            $post_ids = Matrix_Export::get_client_link_post_ids($token, true);
+            $deleted_previews = matrix_export_clear_cached_previews_for_posts($post_ids);
+            Matrix_Export::delete_client_link($token);
+            wp_safe_redirect(add_query_arg([
+                'matrix_client_link_cleared' => '1',
+                'matrix_previews_deleted' => (int) $deleted_previews,
+            ], wp_get_referer()));
+            exit;
+        }
+        if ($action === 'generate_one' && isset($_POST['matrix_client_link_token'])) {
+            $token = sanitize_text_field(wp_unslash($_POST['matrix_client_link_token']));
+            $post_ids = Matrix_Export::get_client_link_post_ids($token, true);
+            $result = Matrix_Export::generate_block_previews_async($post_ids, $token);
+            wp_safe_redirect(add_query_arg([
+                'matrix_previews_queued' => isset($result['queued']) && $result['queued'] ? '1' : '0',
+                'matrix_previews_tasks' => isset($result['tasks']) ? (int) $result['tasks'] : 0,
+                'matrix_previews_job' => isset($result['job_key']) ? rawurlencode((string) $result['job_key']) : '',
+                'matrix_previews_reason' => isset($result['reason']) ? rawurlencode((string) $result['reason']) : '',
+            ], wp_get_referer()));
+            exit;
+        }
+        if ($action === 'clear_all') {
+            $deleted_previews = matrix_export_clear_cached_previews();
+            Matrix_Export::clear_client_links();
+            wp_safe_redirect(add_query_arg([
+                'matrix_client_link_cleared_all' => '1',
+                'matrix_previews_deleted' => (int) $deleted_previews,
+            ], wp_get_referer()));
+            exit;
+        }
+    }
+
+    if (
+        isset($_GET['matrix_generate_screenshots_token'], $_GET['_wpnonce']) &&
+        wp_verify_nonce($_GET['_wpnonce'], 'matrix_generate_screenshots_' . $_GET['matrix_generate_screenshots_token'])
+    ) {
+        $token = sanitize_text_field(wp_unslash($_GET['matrix_generate_screenshots_token']));
+        $post_ids = Matrix_Export::get_client_link_post_ids($token, true);
+        $result = Matrix_Export::generate_block_previews_async($post_ids, $token);
+        $back = admin_url('tools.php?page=matrix-content-export');
+        wp_safe_redirect(add_query_arg([
+            'matrix_previews_queued' => isset($result['queued']) && $result['queued'] ? '1' : '0',
+            'matrix_previews_tasks' => isset($result['tasks']) ? (int) $result['tasks'] : 0,
+            'matrix_previews_job' => isset($result['job_key']) ? rawurlencode((string) $result['job_key']) : '',
+            'matrix_previews_reason' => isset($result['reason']) ? rawurlencode((string) $result['reason']) : '',
+        ], $back));
+        exit;
+    }
+
+    // Legacy GET export (single CSV / single doc) – no selection
+    if (isset($_GET['matrix_export_csv']) && isset($_GET['_wpnonce']) && wp_verify_nonce($_GET['_wpnonce'], 'matrix_export_csv')) {
+        Matrix_Export::download_csv(null);
+        exit;
+    }
+    if (isset($_GET['matrix_export_doc']) && isset($_GET['_wpnonce']) && wp_verify_nonce($_GET['_wpnonce'], 'matrix_export_doc')) {
+        Matrix_Export::download_doc(null);
+        exit;
+    }
+
+    // POST export with selection (Excel/CSV/Doc)
+    if (isset($_POST['matrix_export_nonce']) && wp_verify_nonce($_POST['matrix_export_nonce'], 'matrix_export')) {
+        if (isset($_POST['matrix_form_fields_settings_present']) && $_POST['matrix_form_fields_settings_present'] === '1') {
+            $all_field_keys = Matrix_Export::get_all_content_field_keys();
+            $disabled_fields = isset($_POST['matrix_disabled_form_fields']) && is_array($_POST['matrix_disabled_form_fields'])
+                ? array_map(function ($key) {
+                    return sanitize_key((string) wp_unslash($key));
+                }, $_POST['matrix_disabled_form_fields'])
+                : [];
+            $disabled_map = array_fill_keys(array_filter($disabled_fields), true);
+            $clean_disabled = [];
+            foreach ($all_field_keys as $field_key) {
+                if (isset($disabled_map[$field_key])) {
+                    $clean_disabled[] = $field_key;
+                }
+            }
+            if (!empty($clean_disabled)) {
+                update_option(MATRIX_EXPORT_DISABLED_FORM_FIELDS_OPTION, array_values(array_unique($clean_disabled)), false);
+            } else {
+                delete_option(MATRIX_EXPORT_DISABLED_FORM_FIELDS_OPTION);
+            }
+        }
+        if (isset($_POST['matrix_admin_duplicate_notify_email'])) {
+            $admin_notify_email = sanitize_email(wp_unslash($_POST['matrix_admin_duplicate_notify_email']));
+            if ($admin_notify_email !== '') {
+                update_option(MATRIX_EXPORT_ADMIN_DUPLICATE_NOTIFY_EMAIL_OPTION, $admin_notify_email);
+            } else {
+                delete_option(MATRIX_EXPORT_ADMIN_DUPLICATE_NOTIFY_EMAIL_OPTION);
+            }
+        }
+        if (isset($_POST['matrix_notify_email'])) {
+            $notify_email = sanitize_email(wp_unslash($_POST['matrix_notify_email']));
+            if ($notify_email !== '') {
+                update_option(MATRIX_EXPORT_NOTIFY_EMAIL_OPTION, $notify_email);
+            } else {
+                delete_option(MATRIX_EXPORT_NOTIFY_EMAIL_OPTION);
+            }
+        }
+        $post_ids = isset($_POST['matrix_export_post_ids']) && is_array($_POST['matrix_export_post_ids'])
+            ? array_map('intval', $_POST['matrix_export_post_ids'])
+            : [];
+        $format = isset($_POST['matrix_export_format']) ? sanitize_key($_POST['matrix_export_format']) : '';
+
+        if ($format === 'client_link' && !empty($post_ids)) {
+            $expires_days = isset($_POST['matrix_client_link_expires_days']) ? max(0, (int) $_POST['matrix_client_link_expires_days']) : 0;
+            $reminder_days = isset($_POST['matrix_client_link_reminder_days']) ? max(0, (int) $_POST['matrix_client_link_reminder_days']) : 0;
+            $custom_instructions = isset($_POST['matrix_client_custom_instructions']) ? wp_kses_post(wp_unslash((string) $_POST['matrix_client_custom_instructions'])) : '';
+            $token = Matrix_Export::create_client_link($post_ids, [
+                'expires_days' => $expires_days,
+                'reminder_days' => $reminder_days,
+                'custom_instructions' => $custom_instructions,
+            ]);
+            if ($token !== '') {
+                $redirect = add_query_arg(
+                    [
+                        'matrix_client_link' => '1',
+                        'matrix_client_token' => rawurlencode($token),
+                    ],
+                    wp_get_referer()
+                );
+                wp_safe_redirect($redirect);
+                exit;
+            }
+        }
+        if ($format === 'client_links_excel') {
+            if (empty($post_ids)) {
+                wp_safe_redirect(add_query_arg('matrix_export_error', 'excel_no_selection', wp_get_referer()));
+                exit;
+            }
+            Matrix_Export::download_client_links_workbook($post_ids);
+            exit;
+        }
+        if ($format !== 'client_link' && !empty($post_ids)) {
+            wp_safe_redirect(add_query_arg('matrix_export_error', 'unsupported', wp_get_referer()));
+            exit;
+        }
+        if (!empty($post_ids)) {
+            wp_safe_redirect(add_query_arg('matrix_export_error', '1', wp_get_referer()));
+            exit;
+        }
+    }
+}
+
+/**
+ * AJAX status endpoint for screenshot generation progress.
+ */
+function matrix_export_preview_progress() {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'forbidden'], 403);
+    }
+    $job = isset($_GET['job']) ? sanitize_text_field(wp_unslash($_GET['job'])) : '';
+    if ($job === '') {
+        wp_send_json_success(['found' => false]);
+    }
+    $status = Matrix_Export::get_preview_status($job);
+    if (empty($status)) {
+        wp_send_json_success(['found' => false]);
+    }
+    $total = isset($status['total']) ? (int) $status['total'] : 0;
+    $completed = isset($status['completed']) ? (int) $status['completed'] : 0;
+    $generated = isset($status['generated']) ? (int) $status['generated'] : 0;
+    $done = !empty($status['done']);
+    $error = isset($status['error']) ? (string) $status['error'] : '';
+    $percent = ($total > 0) ? (int) floor(($completed / $total) * 100) : 0;
+    $stats = isset($status['stats']) && is_array($status['stats']) ? $status['stats'] : [];
+    wp_send_json_success([
+        'found' => true,
+        'total' => $total,
+        'completed' => $completed,
+        'generated' => $generated,
+        'done' => $done,
+        'error' => $error,
+        'percent' => $percent,
+        'stats' => [
+            'selector_matches' => isset($stats['selector_matches']) ? (int) $stats['selector_matches'] : 0,
+            'section_fallback_matches' => isset($stats['section_fallback_matches']) ? (int) $stats['section_fallback_matches'] : 0,
+            'no_target_matches' => isset($stats['no_target_matches']) ? (int) $stats['no_target_matches'] : 0,
+            'capture_errors' => isset($stats['capture_errors']) ? (int) $stats['capture_errors'] : 0,
+            'last_error' => isset($stats['last_error']) ? (string) $stats['last_error'] : '',
+        ],
+    ]);
+}
+
+/**
+ * AJAX: save a single page status from the client form.
+ */
+function matrix_export_ajax_save_page_status() {
+    if (!is_user_logged_in() || !matrix_export_user_can_access_client_form()) {
+        wp_send_json_error(['message' => 'Forbidden'], 403);
+    }
+    if (!isset($_POST['matrix_save_status_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['matrix_save_status_nonce'])), 'matrix_export_save_page_status')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 400);
+    }
+    $token = isset($_POST['matrix_form_token']) ? sanitize_text_field(wp_unslash($_POST['matrix_form_token'])) : '';
+    $post_id = isset($_POST['matrix_post_id']) ? (int) $_POST['matrix_post_id'] : 0;
+    $status = isset($_POST['matrix_status']) ? sanitize_text_field(wp_unslash($_POST['matrix_status'])) : '';
+    if ($token === '' || $post_id <= 0 || !in_array($status, ['todo', 'inprogress', 'done', 'delete'], true)) {
+        wp_send_json_error(['message' => 'Invalid parameters'], 400);
+    }
+    $allowed = Matrix_Export::get_client_link_post_ids($token);
+    if (empty($allowed) || !in_array($post_id, array_map('intval', $allowed), true)) {
+        wp_send_json_error(['message' => 'Invalid token or post'], 403);
+    }
+    $done_by = '';
+    if ($status === 'done' && function_exists('wp_get_current_user')) {
+        $user = wp_get_current_user();
+        $done_by = isset($user->user_email) ? (string) $user->user_email : '';
+    }
+    if (method_exists('Matrix_Import', 'update_draft_page_status')) {
+        Matrix_Import::update_draft_page_status($token, $post_id, $status, $done_by);
+    }
+    update_post_meta($post_id, MATRIX_EXPORT_STATUS_META_KEY, $status);
+    if ($status === 'done' && $done_by !== '') {
+        update_post_meta($post_id, MATRIX_EXPORT_STATUS_DONE_BY_META_KEY, $done_by);
+    } else {
+        delete_post_meta($post_id, MATRIX_EXPORT_STATUS_DONE_BY_META_KEY);
+    }
+    wp_send_json_success(['saved' => true, 'done_by' => $done_by]);
+}
+
+/**
+ * AJAX: autosave full form payload in "Save for later" mode.
+ */
+function matrix_export_ajax_autosave_draft() {
+    if (!is_user_logged_in() || !matrix_export_user_can_access_client_form()) {
+        wp_send_json_error(['message' => 'Forbidden'], 403);
+    }
+    if (!isset($_POST['matrix_autosave_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['matrix_autosave_nonce'])), 'matrix_export_autosave_draft')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 400);
+    }
+    $token = isset($_POST['matrix_form_token']) ? sanitize_text_field(wp_unslash($_POST['matrix_form_token'])) : '';
+    if ($token === '') {
+        wp_send_json_error(['message' => 'Missing token'], 400);
+    }
+    $_POST['matrix_is_autosave'] = '1';
+    $result = Matrix_Import::handle_form_submit($_POST, isset($_FILES) ? $_FILES : [], 'later');
+    if (empty($result['success'])) {
+        wp_send_json_error(['message' => isset($result['message']) ? (string) $result['message'] : 'Autosave failed'], 400);
+    }
+    $draft_state = Matrix_Import::get_client_form_draft_state($token, []);
+    $saved_at = isset($draft_state['saved_at']) ? (int) $draft_state['saved_at'] : time();
+    wp_send_json_success([
+        'saved' => true,
+        'saved_at' => $saved_at,
+        'saved_at_text' => wp_date('M j, Y g:i a', $saved_at),
+    ]);
+}
+
+/**
+ * AJAX: duplicate a page/post from the client form and return an editable form URL.
+ */
+function matrix_export_ajax_duplicate_page() {
+    if (!is_user_logged_in() || !matrix_export_user_can_access_client_form()) {
+        wp_send_json_error(['message' => 'Forbidden'], 403);
+    }
+    if (!isset($_POST['matrix_duplicate_page_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['matrix_duplicate_page_nonce'])), 'matrix_export_duplicate_page')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 400);
+    }
+
+    $token = isset($_POST['matrix_form_token']) ? sanitize_text_field(wp_unslash($_POST['matrix_form_token'])) : '';
+    $post_id = isset($_POST['matrix_post_id']) ? (int) $_POST['matrix_post_id'] : 0;
+    if ($token === '' || $post_id <= 0) {
+        wp_send_json_error(['message' => 'Invalid parameters'], 400);
+    }
+    $allowed = Matrix_Export::get_client_link_post_ids($token);
+    if (empty($allowed) || !in_array($post_id, array_map('intval', $allowed), true)) {
+        wp_send_json_error(['message' => 'Invalid token or post'], 403);
+    }
+
+    $source = get_post($post_id);
+    if (!$source || !($source instanceof WP_Post)) {
+        wp_send_json_error(['message' => 'Source post not found'], 404);
+    }
+    if (!current_user_can('edit_post', $post_id) || !current_user_can('edit_posts')) {
+        wp_send_json_error(['message' => 'Insufficient permissions'], 403);
+    }
+
+    $new_status = current_user_can('publish_posts') ? 'publish' : 'draft';
+    $new_post_id = wp_insert_post([
+        'post_type' => $source->post_type,
+        'post_title' => $source->post_title . ' (Copy)',
+        'post_content' => $source->post_content,
+        'post_excerpt' => $source->post_excerpt,
+        'post_status' => $new_status,
+        'post_parent' => (int) $source->post_parent,
+        'menu_order' => (int) $source->menu_order,
+        'post_author' => get_current_user_id(),
+        'comment_status' => $source->comment_status,
+        'ping_status' => $source->ping_status,
+    ], true);
+    if (is_wp_error($new_post_id) || !$new_post_id) {
+        wp_send_json_error(['message' => 'Could not duplicate page'], 500);
+    }
+
+    $thumb_id = (int) get_post_thumbnail_id($post_id);
+    if ($thumb_id > 0) {
+        set_post_thumbnail($new_post_id, $thumb_id);
+    }
+
+    $taxonomies = get_object_taxonomies($source->post_type, 'names');
+    if (is_array($taxonomies)) {
+        foreach ($taxonomies as $taxonomy) {
+            $term_ids = wp_get_object_terms($post_id, $taxonomy, ['fields' => 'ids']);
+            if (is_wp_error($term_ids)) {
+                continue;
+            }
+            wp_set_post_terms($new_post_id, array_map('intval', (array) $term_ids), $taxonomy, false);
+        }
+    }
+
+    $template = get_post_meta($post_id, '_wp_page_template', true);
+    if (is_string($template) && $template !== '') {
+        update_post_meta($new_post_id, '_wp_page_template', $template);
+    }
+
+    if (function_exists('get_field') && function_exists('update_field')) {
+        foreach ([Matrix_Export::HERO_FIELD, Matrix_Export::FLEX_FIELD] as $acf_field) {
+            // Use unformatted/raw ACF values so relationship/taxonomy subfields remain IDs, not WP_Term objects.
+            $value = get_field($acf_field, $post_id, false);
+            if (is_array($value)) {
+                $value = matrix_export_normalize_acf_value_for_save($value);
+                update_field($acf_field, $value, $new_post_id);
+            }
+        }
+    }
+
+    // Add duplicate into the same tokenized form so it appears as a new editable tab.
+    $links = Matrix_Export::get_client_links();
+    if (isset($links[$token]) && is_array($links[$token])) {
+        $token_post_ids = isset($links[$token]['post_ids']) && is_array($links[$token]['post_ids'])
+            ? array_map('intval', $links[$token]['post_ids'])
+            : [];
+        $token_post_ids[] = (int) $new_post_id;
+        $links[$token]['post_ids'] = array_values(array_unique(array_filter($token_post_ids)));
+        update_option(Matrix_Export::CLIENT_LINKS_OPTION, $links, false);
+    }
+
+    $form_url = Matrix_Export::get_client_link_url($token);
+    $form_url = add_query_arg('matrix_page', (int) $new_post_id, $form_url);
+    $view_url = get_preview_post_link($new_post_id);
+    if (!is_string($view_url) || $view_url === '') {
+        $view_url = get_permalink($new_post_id);
+    }
+    $edit_url = get_edit_post_link($new_post_id, '');
+    matrix_export_send_duplicate_notification_email($post_id, (int) $new_post_id, $token, $form_url, $view_url);
+
+    wp_send_json_success([
+        'new_post_id' => (int) $new_post_id,
+        'form_url' => is_string($form_url) ? $form_url : '',
+        'view_url' => is_string($view_url) ? $view_url : '',
+        'edit_url' => is_string($edit_url) ? $edit_url : '',
+        'title' => get_the_title($new_post_id),
+    ]);
+}
+
+/**
+ * AJAX: return detected editable field keys for selected post IDs (admin settings helper).
+ */
+function matrix_export_ajax_get_fields_for_posts() {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'forbidden'], 403);
+    }
+    if (!isset($_POST['matrix_fields_for_posts_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['matrix_fields_for_posts_nonce'])), 'matrix_export_fields_for_posts')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 400);
+    }
+    $post_ids = isset($_POST['post_ids']) && is_array($_POST['post_ids'])
+        ? array_values(array_unique(array_filter(array_map('intval', $_POST['post_ids']))))
+        : [];
+    if (empty($post_ids)) {
+        wp_send_json_success(['field_keys' => []]);
+    }
+    $data = Matrix_Export::get_export_data_for_form($post_ids, false);
+    $keys = isset($data['field_keys']) && is_array($data['field_keys']) ? array_values(array_filter(array_map('strval', $data['field_keys']))) : [];
+    sort($keys);
+    wp_send_json_success(['field_keys' => $keys]);
+}
+
+/**
+ * Normalize nested ACF values to safe scalars/arrays before update_field().
+ *
+ * @param mixed $value
+ * @return mixed
+ */
+function matrix_export_normalize_acf_value_for_save($value) {
+    if (is_array($value)) {
+        $out = [];
+        foreach ($value as $k => $v) {
+            $out[$k] = matrix_export_normalize_acf_value_for_save($v);
+        }
+        return $out;
+    }
+    if (!is_object($value)) {
+        return $value;
+    }
+    if ($value instanceof WP_Error) {
+        return 0;
+    }
+    if ($value instanceof WP_Term) {
+        return isset($value->term_id) ? (int) $value->term_id : 0;
+    }
+    if ($value instanceof WP_Post || $value instanceof WP_User) {
+        return isset($value->ID) ? (int) $value->ID : 0;
+    }
+    if (method_exists($value, '__toString')) {
+        return (string) $value;
+    }
+    return 0;
+}
+
+/**
+ * Email notification when a page/post is duplicated from the client form.
+ *
+ * @param int $source_post_id
+ * @param int $new_post_id
+ * @param string $token
+ * @param string $form_url
+ * @param string $view_url
+ * @return void
+ */
+function matrix_export_send_duplicate_notification_email($source_post_id, $new_post_id, $token, $form_url, $view_url) {
+    $option_key = defined('MATRIX_EXPORT_ADMIN_DUPLICATE_NOTIFY_EMAIL_OPTION') ? MATRIX_EXPORT_ADMIN_DUPLICATE_NOTIFY_EMAIL_OPTION : '';
+    if ($option_key === '') {
+        return;
+    }
+    $to = sanitize_email((string) get_option($option_key, ''));
+    if ($to === '' || !is_email($to)) {
+        return;
+    }
+    $source_post_id = (int) $source_post_id;
+    $new_post_id = (int) $new_post_id;
+    if ($source_post_id <= 0 || $new_post_id <= 0) {
+        return;
+    }
+
+    $source_title = get_the_title($source_post_id);
+    if (!is_string($source_title) || $source_title === '') {
+        $source_title = 'Post #' . $source_post_id;
+    }
+    $new_title = get_the_title($new_post_id);
+    if (!is_string($new_title) || $new_title === '') {
+        $new_title = 'Post #' . $new_post_id;
+    }
+    $duplicator = '';
+    if (function_exists('wp_get_current_user')) {
+        $user = wp_get_current_user();
+        if ($user && !empty($user->user_email)) {
+            $duplicator = (string) $user->user_email;
+        }
+    }
+    $site_name = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
+    $subject = sprintf('[%s] Client duplicated a page', $site_name);
+    $body = "A page/post was duplicated from the content editing form.\n\n";
+    $body .= 'Date: ' . wp_date('Y-m-d H:i:s') . "\n";
+    $body .= 'Site: ' . home_url('/') . "\n";
+    if ($duplicator !== '') {
+        $body .= 'Duplicated by: ' . $duplicator . "\n";
+    }
+    $body .= 'Original: ' . $source_title . ' (ID ' . $source_post_id . ')' . "\n";
+    $body .= 'Duplicate: ' . $new_title . ' (ID ' . $new_post_id . ')' . "\n";
+    if (is_string($token) && $token !== '') {
+        $body .= 'Token: ' . $token . "\n";
+    }
+    if (is_string($form_url) && $form_url !== '') {
+        $body .= 'Open in editable form: ' . $form_url . "\n";
+    }
+    if (is_string($view_url) && $view_url !== '') {
+        $body .= 'View duplicate page: ' . $view_url . "\n";
+    }
+    $edit_url = get_edit_post_link($new_post_id, '');
+    if (is_string($edit_url) && $edit_url !== '') {
+        $body .= 'WP Admin edit link: ' . $edit_url . "\n";
+    }
+    wp_mail($to, $subject, $body, ['Content-Type: text/plain; charset=UTF-8']);
+}
+
+/**
+ * Handle client form POST (editable HTML form submitted back to site). No admin login required; token required.
+ */
+function matrix_export_handle_client_form_submit() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || empty($_POST['matrix_form_submit']) || empty($_POST['matrix_form_token'])) {
+        return;
+    }
+    if (!is_user_logged_in()) {
+        auth_redirect();
+    }
+    if (!matrix_export_user_can_access_client_form()) {
+        wp_die(
+            esc_html__('You do not have permission to edit this content.', 'matrix-content-export'),
+            esc_html__('Access denied', 'matrix-content-export'),
+            ['response' => 403]
+        );
+    }
+    $active_page = isset($_POST['matrix_active_page']) ? (int) $_POST['matrix_active_page'] : 0;
+    $submit_mode = isset($_POST['matrix_submit_mode']) ? sanitize_key(wp_unslash($_POST['matrix_submit_mode'])) : 'publish';
+    if ($submit_mode !== 'draft' && $submit_mode !== 'later') {
+        $submit_mode = 'publish';
+    }
+    if ($submit_mode === 'draft') {
+        $submit_mode = 'later';
+    }
+    $result = Matrix_Import::handle_form_submit($_POST, isset($_FILES) ? $_FILES : [], $submit_mode);
+    if ($result['success'] && !empty($result['redirect'])) {
+        $redirect = $result['redirect'];
+        $token = isset($_POST['matrix_form_token']) ? sanitize_text_field(wp_unslash($_POST['matrix_form_token'])) : '';
+        if ($token !== '') {
+            $redirect = home_url('/' . MATRIX_EXPORT_CLIENT_FORM_SLUG . '/');
+            $redirect = add_query_arg('matrix_form_saved', '1', $redirect);
+            $redirect = add_query_arg('matrix_form_saved_mode', $submit_mode, $redirect);
+            $redirect = add_query_arg('matrix_token', rawurlencode($token), $redirect);
+            if ($active_page > 0) {
+                $redirect = add_query_arg('matrix_page', $active_page, $redirect);
+            }
+        }
+        wp_safe_redirect($redirect);
+        exit;
+    }
+    if (!$result['success']) {
+        wp_die(esc_html($result['message']), 'Content form', ['response' => 400, 'back_link' => true]);
+    }
+}
+
+/**
+ * Add Content status column to Pages and Posts list.
+ */
+function matrix_export_add_status_column($columns) {
+    $insert = ['matrix_content_status' => __('Content status', 'matrix-content-export')];
+    $keys = array_keys($columns);
+    $title_pos = array_search('title', $keys, true);
+    if ($title_pos !== false && $title_pos < count($keys) - 1) {
+        return array_merge(array_slice($columns, 0, $title_pos + 1), $insert, array_slice($columns, $title_pos + 1));
+    }
+    return array_merge($insert, $columns);
+}
+
+/**
+ * Output content status in list table.
+ */
+function matrix_export_show_status_column($column_name, $post_id) {
+    if ($column_name !== 'matrix_content_status') {
+        return;
+    }
+    $status = get_post_meta($post_id, MATRIX_EXPORT_STATUS_META_KEY, true);
+    if (!in_array($status, ['todo', 'inprogress', 'done', 'delete'], true)) {
+        $status = 'todo';
+    }
+    $labels = [
+        'todo' => __('To do', 'matrix-content-export'),
+        'inprogress' => __('In progress', 'matrix-content-export'),
+        'done' => __('Done', 'matrix-content-export'),
+        'delete' => __('Delete', 'matrix-content-export'),
+    ];
+    $label = isset($labels[$status]) ? $labels[$status] : $labels['todo'];
+    $class = 'matrix-status matrix-status-' . $status;
+    echo '<span class="' . esc_attr($class) . '" aria-label="' . esc_attr($label) . '">' . esc_html($label) . '</span>';
+    if ($status === 'done') {
+        $done_by = get_post_meta($post_id, MATRIX_EXPORT_STATUS_DONE_BY_META_KEY, true);
+        if ($done_by !== '') {
+            echo '<br><span class="matrix-status-done-by">' . esc_html(__('by', 'matrix-content-export') . ' ' . $done_by) . '</span>';
+        }
+    }
+}
+
+/**
+ * Inline styles for Content status column.
+ */
+function matrix_export_status_column_styles() {
+    echo '<style>
+    .matrix-status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    .matrix-status-todo { background: #fff3cd; color: #856404; }
+    .matrix-status-inprogress { background: #cce5ff; color: #004085; }
+    .matrix-status-done { background: #d4edda; color: #155724; }
+    .matrix-status-delete { background: #f8d7da; color: #721c24; }
+    .matrix-status-done-by { display: block; margin-top: 2px; font-size: 11px; color: #50575e; }
+    </style>';
+}
+
+function matrix_export_form_saved_notice() {
+    if (!isset($_GET['matrix_form_saved']) || $_GET['matrix_form_saved'] !== '1') {
+        return;
+    }
+    $saved_mode = isset($_GET['matrix_form_saved_mode']) ? sanitize_key(wp_unslash($_GET['matrix_form_saved_mode'])) : 'publish';
+    $notice_text = ($saved_mode === 'later' || $saved_mode === 'draft')
+        ? 'Form saved for later editing. Changes were not published.'
+        : 'Content saved successfully. You can close this page.';
+    echo '<div id="matrix-form-saved-notice" style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#00a32a;color:#fff;padding:12px 24px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:999999;font-size:14px;">' . esc_html($notice_text) . '</div>';
+    echo '<script>setTimeout(function(){ var e=document.getElementById("matrix-form-saved-notice"); if(e) e.remove(); }, 5000);</script>';
+}
+
+/**
+ * Check if current request is for the content-editing form (no rewrite rules needed).
+ */
+function matrix_export_is_content_editing_url() {
+    $uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+    $path = trim(parse_url($uri, PHP_URL_PATH), '/');
+    $slug = MATRIX_EXPORT_CLIENT_FORM_SLUG;
+    return ($path === $slug || $path === $slug . '/' || substr($path, -strlen($slug) - 1) === '/' . $slug);
+}
+
+/**
+ * Restrict content editing form to trusted logged-in users.
+ *
+ * Defaults to Administrator + Site Editor roles, with capability fallbacks.
+ *
+ * @param int $user_id Optional user ID. Defaults to current user.
+ * @return bool
+ */
+function matrix_export_user_can_access_client_form($user_id = 0) {
+    $user_id = $user_id ? (int) $user_id : get_current_user_id();
+    if ($user_id <= 0) {
+        return false;
+    }
+
+    $user = get_userdata($user_id);
+    if (!$user || !isset($user->roles) || !is_array($user->roles)) {
+        return false;
+    }
+
+    $allowed_roles = apply_filters('matrix_export_client_form_allowed_roles', ['administrator', 'site_editor']);
+    $allowed_roles = array_filter(array_map('sanitize_key', (array) $allowed_roles));
+    if (!empty(array_intersect($allowed_roles, $user->roles))) {
+        return true;
+    }
+
+    $allowed_caps = apply_filters('matrix_export_client_form_allowed_capabilities', ['manage_options', 'edit_theme_options']);
+    foreach ((array) $allowed_caps as $capability) {
+        $capability = sanitize_key((string) $capability);
+        if ($capability !== '' && user_can($user_id, $capability)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function matrix_export_render_content_editing_form() {
+    if (!matrix_export_is_content_editing_url()) {
+        return;
+    }
+    if (!is_user_logged_in()) {
+        auth_redirect();
+    }
+    if (!matrix_export_user_can_access_client_form()) {
+        wp_die(
+            esc_html__('You do not have permission to access the content editing form.', 'matrix-content-export'),
+            esc_html__('Access denied', 'matrix-content-export'),
+            ['response' => 403]
+        );
+    }
+    $token = isset($_GET['matrix_token']) ? sanitize_text_field(wp_unslash($_GET['matrix_token'])) : '';
+    $post_ids = Matrix_Export::get_client_link_post_ids($token);
+    if (empty($post_ids) || !is_array($post_ids)) {
+        $entry_including_expired = Matrix_Export::get_client_link_entry($token, true);
+        $is_expired = !empty($entry_including_expired) && Matrix_Export::is_client_link_expired($entry_including_expired);
+        $expired_text = '';
+        if ($is_expired) {
+            $expires_at = isset($entry_including_expired['expires_at']) ? (int) $entry_including_expired['expires_at'] : 0;
+            if ($expires_at > 0) {
+                $expired_text = ' This link expired on ' . wp_date('M j, Y g:i a', $expires_at) . '.';
+            }
+        }
+        status_header(200);
+        echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Content editing</title></head><body style="font-family:sans-serif;max-width:560px;margin:3rem auto;padding:1rem;">';
+        echo '<p><strong>Invalid or expired link.</strong>' . esc_html($expired_text) . ' Ask your project team to generate a new client link in <strong>Tools → Content Export</strong>.</p>';
+        echo '</body></html>';
+        exit;
+    }
+    $data = Matrix_Export::get_export_data_for_form($post_ids);
+    if (empty($data['rows'])) {
+        status_header(200);
+        echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Content editing</title></head><body style="font-family:sans-serif;max-width:560px;margin:3rem auto;padding:1rem;">';
+        echo '<p>No content to edit for the selected pages.</p></body></html>';
+        exit;
+    }
+    global $wp_query;
+    $wp_query->is_404 = false;
+    status_header(200);
+    add_filter('template_include', function () {
+        return MATRIX_EXPORT_DIR . 'templates/content-editing-wrapper.php';
+    }, 99);
+}
+
+function matrix_export_render_page() {
+    $import_message = '';
+    if (isset($_POST['matrix_import_nonce']) && wp_verify_nonce($_POST['matrix_import_nonce'], 'matrix_import')) {
+        $import_message = Matrix_Import::handle_upload();
+    }
+    $export_error = isset($_GET['matrix_export_error']);
+    $client_link_url = '';
+    $created_client_token = isset($_GET['matrix_client_token']) ? sanitize_text_field(wp_unslash($_GET['matrix_client_token'])) : '';
+    if ($created_client_token !== '') {
+        $client_link_url = Matrix_Export::get_client_link_url($created_client_token);
+    }
+    $show_client_link = isset($_GET['matrix_client_link']);
+    $client_links = Matrix_Export::get_client_links();
+    uasort($client_links, function ($a, $b) {
+        $a_created = isset($a['created_at']) ? (int) $a['created_at'] : 0;
+        $b_created = isset($b['created_at']) ? (int) $b['created_at'] : 0;
+        return $b_created <=> $a_created;
+    });
+    $client_link_cleared = isset($_GET['matrix_client_link_cleared']);
+    $client_links_cleared_all = isset($_GET['matrix_client_link_cleared_all']);
+    include MATRIX_EXPORT_DIR . 'templates/admin-page.php';
+}

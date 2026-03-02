@@ -1,0 +1,10 @@
+{
+    "name": "matrix/matrix-content-export",
+    "description": "Excel export dependency for Matrix Content Export plugin",
+    "require": {
+        "phpoffice/phpspreadsheet": "^1.29"
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

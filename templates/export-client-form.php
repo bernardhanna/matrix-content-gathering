@@ -290,8 +290,7 @@ if (!$in_theme) : ?>
 .matrix-content-edit-wrap .matrix-duplicate-page-btn { display: inline-flex; align-items: center; justify-content: center; margin-left: 8px; padding: 7px 12px; border: 2px solid #c8ced3; background: #fff; color: #323e48; text-decoration: none; font-size: 0.86rem; font-weight: 700; cursor: pointer; }
 .matrix-content-edit-wrap .matrix-duplicate-page-btn:hover { background: #f5f7f8; border-color: #a8b0b8; }
 .matrix-content-edit-wrap .matrix-auth-actions { position: sticky; top: 0; z-index: 50; display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 10px; margin-bottom: 0.75rem; background: #fff; border-bottom: 1px solid #eceff1; padding: 6px 0; overflow-x: auto; }
-.matrix-content-edit-wrap .matrix-page-select-wrap { position: relative; display: inline-flex; align-items: center; gap: 8px; border-left: 4px solid var(--matrix-border); border-radius: 4px; padding-left: 8px; }
-.matrix-content-edit-wrap .matrix-page-select-wrap.status-todo { border-left-color: #d39e00; }
+.matrix-content-edit-wrap .matrix-page-select-wrap.status-todo { border-left-color: #d39e00;     max-width: 280px;}
 .matrix-content-edit-wrap .matrix-page-select-wrap.status-inprogress { border-left-color: #007bff; }
 .matrix-content-edit-wrap .matrix-page-select-wrap.status-done { border-left-color: #28a745; }
 .matrix-content-edit-wrap .matrix-page-select-wrap.status-delete { border-left-color: #dc3545; }
@@ -345,6 +344,15 @@ if (!$in_theme) : ?>
     .matrix-content-edit-wrap .submit-actions { display: grid; grid-template-columns: 1fr; }
     .matrix-content-edit-wrap .submit-wrap button { width: 100%; }
 }
+.matrix-content-edit-wrap .matrix-page-select-wrap { position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-left: 4px solid var(--matrix-border);
+    border-radius: 4px;
+    padding-left: 8px;
+    width: 280x;
+    width: 100%; }
 </style>
 <?php endif; ?>
     <?php if (function_exists('is_user_logged_in') && is_user_logged_in() && function_exists('wp_logout_url')) :

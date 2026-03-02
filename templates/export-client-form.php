@@ -522,12 +522,11 @@ if (!$in_theme) : ?>
                         <?php
                         $preview_url = '';
                         if ($block_source !== Matrix_Export::POST_FIELDS_SOURCE && function_exists('get_permalink')) {
-                            $source_slug = preg_replace('/[^a-z0-9_\-]/i', '', (string) $block_source);
-                            $anchor = 'matrix-block-' . $source_slug . '-' . (int) $block_index;
+                            $anchor = Matrix_Export::get_block_anchor_id($block_source, (int) $block_index, (string) $block_type);
                             $preview_url = get_permalink((int) $post_id);
                             if ($preview_url) {
                                 $preview_url = Matrix_Export::normalize_url_for_current_request($preview_url);
-                                $preview_url = add_query_arg('matrix_preview', '1', $preview_url);
+                                $preview_url = remove_query_arg('matrix_preview', $preview_url);
                                 $preview_url .= '#' . $anchor;
                             }
                         }

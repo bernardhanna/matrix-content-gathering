@@ -48,6 +48,7 @@ add_action('manage_posts_custom_column', 'matrix_export_show_status_column', 10,
 add_action('admin_head-edit.php', 'matrix_export_status_column_styles');
 add_action('template_redirect', 'matrix_export_render_content_editing_form', 1);
 add_action('wp_footer', 'matrix_export_form_saved_notice');
+add_action('wp_footer', 'matrix_export_hash_anchor_resolver', 20);
 add_filter('show_admin_bar', 'matrix_export_hide_admin_bar_on_content_editing', 99);
 
 /**
@@ -772,6 +773,46 @@ function matrix_export_form_saved_notice() {
         : 'Content saved successfully. You can close this page.';
     echo '<div id="matrix-form-saved-notice" style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#00a32a;color:#fff;padding:12px 24px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:999999;font-size:14px;">' . esc_html($notice_text) . '</div>';
     echo '<script>setTimeout(function(){ var e=document.getElementById("matrix-form-saved-notice"); if(e) e.remove(); }, 5000);</script>';
+}
+
+/**
+ * If URL hash doesn't match an element id, fall back to matching [data-matrix-block="<hash>"].
+ * This keeps "View Section" links working when themes use non-deterministic section IDs.
+ */
+function matrix_export_hash_anchor_resolver() {
+    if (is_admin()) {
+        return;
+    }
+    ?>
+    <script>
+    (function () {
+      var decodeHash = function () {
+        if (!window.location.hash || window.location.hash.length < 2) return '';
+        try { return decodeURIComponent(window.location.hash.slice(1)); } catch (e) { return window.location.hash.slice(1); }
+      };
+      var cssEscape = function (value) {
+        if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
+        return String(value).replace(/["\\]/g, '\\$&');
+      };
+      var resolveHashTarget = function () {
+        var raw = decodeHash();
+        if (!raw) return;
+        if (document.getElementById(raw)) return;
+        var selector = '[data-matrix-block="' + cssEscape(raw) + '"]';
+        var target = document.querySelector(selector);
+        if (!target) return;
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      };
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', resolveHashTarget, { once: true });
+      } else {
+        resolveHashTarget();
+      }
+      window.addEventListener('load', resolveHashTarget, { once: true });
+      window.addEventListener('hashchange', resolveHashTarget);
+    })();
+    </script>
+    <?php
 }
 
 /**

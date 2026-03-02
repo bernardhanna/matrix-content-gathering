@@ -51,7 +51,13 @@ foreach ($all_posts as $post) {
                 <p id="matrix-preview-failure-text" style="margin:0.4rem 0 0 0;color:#646970;"></p>
             </div>
         <?php else : ?>
-            <div class="notice notice-warning"><p>Could not start screenshot generation in this environment. <?php echo isset($_GET['matrix_previews_reason']) ? esc_html(wp_unslash($_GET['matrix_previews_reason'])) : ''; ?></p></div>
+            <?php
+            $reason = isset($_GET['matrix_previews_reason']) ? esc_html(wp_unslash($_GET['matrix_previews_reason'])) : '';
+            ?>
+            <div class="notice notice-warning">
+                <p><strong>Screenshot generation is not available in this environment.</strong> <?php echo $reason; ?></p>
+                <p class="description" style="margin: 0.5rem 0 0 0;">Section previews are optional. If Node.js is installed on the server but not in the web server&rsquo;s PATH, add to <code>wp-config.php</code>: <code>define('MATRIX_EXPORT_NODE_BINARY', '/path/to/node');</code></p>
+            </div>
         <?php endif; ?>
     <?php endif; ?>
     <?php if (isset($_GET['matrix_previews_refreshed']) && $_GET['matrix_previews_refreshed'] === '1') :

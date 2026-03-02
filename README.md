@@ -140,6 +140,51 @@ Upload a CSV exported from this plugin to update content.
 
 Use **Hide fields on the client form** in the admin page. The client form will respect those settings automatically.
 
+### “Node.js is not available to PHP runtime” / Screenshot generation unavailable
+
+Section screenshot generation (block previews in the workbook) requires **Node.js**, the **Playwright** npm package, and the **Chromium** browser on the server. You can:
+
+- **Ignore it** – screenshot generation is optional; the rest of the plugin works without it.
+- **Enable it on the server** (SSH as root or the web server user):
+
+  1. **Set the Node path** in `wp-config.php` if the web server user doesn’t have `node` in PATH:
+     ```php
+     define('MATRIX_EXPORT_NODE_BINARY', '/usr/bin/node');
+     ```
+     Find the path with `which node` over SSH.
+
+  2. **Install dependencies and Chromium** in the plugin directory, **as the user that runs PHP** (e.g. `www-data`, `apache`, or the site’s system user), so that `node_modules` and the browser cache are readable by the web server:
+     ```bash
+     cd /var/www/vhosts/…/wp-content/plugins/matrix-content-export
+     npm install
+     npx playwright install chromium
+     ```
+     If you’re SSH’d as root, run as the web user instead:
+     ```bash
+     sudo -u www-data bash -c 'cd /var/www/vhosts/…/wp-content/plugins/matrix-content-export && npm install && npx playwright install chromium'
+     ```
+     Replace `www-data` and the path with your server’s web user and plugin path.
+
+  3. **Optional:** If the browser cache must live in a specific directory (e.g. a shared path), install Chromium there and tell the plugin in `wp-config.php`:
+     ```php
+     define('MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH', '/var/www/playwright-browsers');
+     ```
+     Then run `npx playwright install chromium` with `PLAYWRIGHT_BROWSERS_PATH=/var/www/playwright-browsers` (and ensure the web user can read that directory).
+
+### Screenshots show the wrong section / "View section" link doesn't scroll
+
+Section previews and the **View section** link both use the same **section `id`** on the front-end. The plugin expects anchors like `content-one-1`, `hero-1` (layout name + ACF row index). Your theme must output that same `id` on each block's `<section>` (or wrapper).
+
+
+**Theme change:** Use a deterministic `id` from the ACF layout and row index instead of `wp_rand()` or `wp_generate_uuid4()`:
+
+- **Flexible content blocks:** e.g. `$section_id = str_replace('_', '-', get_row_layout()) . '-' . get_row_index();` so the first "content_one" block gets `id="content-one-1"`, the second `id="content-one-2"`.
+- **Hero blocks:** e.g. `$section_id = 'hero-' . get_row_index();` so the first hero is `id="hero-1"`, the second `id="hero-2"`.
+
+Then the View section link and section screenshots will match the correct block.
+
+**Filter:** Change the anchor with the `matrix_export_block_anchor_id` filter if you need a different scheme.
+
 ## Developer notes
 
 - Main plugin file: `matrix-content-export.php`

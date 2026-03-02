@@ -67,7 +67,14 @@ async function main() {
         tag: (el.tagName || '').toLowerCase(),
         cls: el.className || '',
         childCount: el.childElementCount || 0,
+        hasSectionAncestor: !!(el.closest && el.closest('section')),
       }));
+      if (meta && meta.tag !== 'section' && meta.hasSectionAncestor) {
+        const sectionAncestor = baseLocator.locator('xpath=ancestor::section[1]').first();
+        if ((await sectionAncestor.count()) > 0) {
+          target = sectionAncestor;
+        }
+      }
       const looksLikeAnchor =
         meta &&
         meta.tag === 'div' &&
@@ -83,6 +90,28 @@ async function main() {
     return target;
   };
 
+  const findBlockLocator = async (page, task) => {
+    const rawSelector = String(task.selector || '');
+    const anchorId = rawSelector.startsWith('#') ? rawSelector.slice(1) : rawSelector;
+    if (!anchorId) return { locator: null, matched: false };
+
+    const esc = (s) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const selectorsToTry = [
+      '[data-matrix-block="' + esc(anchorId) + '"]',
+      'section[data-matrix-block="' + esc(anchorId) + '"]',
+      'section[id="' + esc(anchorId) + '"]',
+      '[id="' + esc(anchorId) + '"]',
+      '#' + anchorId.replace(/([^\w-])/g, '\\$1'),
+    ];
+    for (const sel of selectorsToTry) {
+      const locator = page.locator(sel).first();
+      if ((await locator.count()) > 0) return { locator, matched: true };
+    }
+    const sectionWithAnchor = page.locator('section:has([id="' + esc(anchorId) + '"])').first();
+    if ((await sectionWithAnchor.count()) > 0) return { locator: sectionWithAnchor, matched: true };
+    return { locator: null, matched: false };
+  };
+
   let completed = 0;
   let generated = 0;
   const stats = {
@@ -94,7 +123,27 @@ async function main() {
   };
   await writeStatus({ total: tasks.length, completed, generated, done: false, error: '', stats });
 
-  const browser = await chromium.launch({ headless: true });
+  let browser;
+  try {
+    browser = await Promise.race([
+      chromium.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-software-rasterizer',
+          '--no-first-run',
+        ],
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('Browser launch timed out after 60s')), 60000)),
+    ]);
+  } catch (e) {
+    const errMsg = e && (e.message || String(e)) ? String(e.message || e) : 'Browser launch failed';
+    await writeStatus({ total: tasks.length, completed: 0, generated: 0, done: true, error: errMsg, stats });
+    process.exit(1);
+  }
   try {
     const byUrl = new Map();
     for (const task of tasks) {
@@ -141,10 +190,9 @@ async function main() {
         for (const task of urlTasks) {
           try {
             await fs.mkdir(path.dirname(task.output), { recursive: true });
-            const locator = page.locator(String(task.selector)).first();
-            const count = await locator.count();
-            if (count > 0) {
-              const target = await resolveCaptureTarget(page, String(task.selector), locator);
+            const { locator: blockLocator, matched: byAnchor } = await findBlockLocator(page, task);
+            if (byAnchor && blockLocator) {
+              const target = await resolveCaptureTarget(page, String(task.selector), blockLocator);
               await forceVisible(target);
               await target.scrollIntoViewIfNeeded();
               await target.screenshot({

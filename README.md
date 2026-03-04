@@ -26,6 +26,9 @@ It is designed for sites using ACF Flexible Content blocks (e.g. matrix-starter)
 - **Optional per-link moderation**
   - keep default publish-on-submit behavior
   - or require admin approval before client submissions are published
+- **Optional AI block assistant**
+  - generate draft text for block fields from instructions and bullet points
+  - review, accept, reject, or retry before saving
 - **Field visibility settings**: hide specific fields from the client editing form (filterable by selected pages/post types + searchable)
 - **Import CSV** to update ACF flexible content blocks
 
@@ -161,6 +164,8 @@ If you see this notice in the admin UI:
 > `define('MATRIX_EXPORT_NODE_BINARY', '/path/to/node');`
 
 follow the steps below.
+
+You can also set these paths in **Tools -> Content Gathering** under **Screenshot runtime paths (optional)** instead of editing `wp-config.php`.
 
 Example `wp-config.php` overrides:
 

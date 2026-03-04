@@ -1986,9 +1986,14 @@ class Matrix_Export {
      * @return string
      */
     protected static function resolve_node_binary() {
-        $configured = defined('MATRIX_EXPORT_NODE_BINARY') && MATRIX_EXPORT_NODE_BINARY !== ''
-            ? (string) MATRIX_EXPORT_NODE_BINARY
-            : '';
+        $runtime_settings = function_exists('matrix_export_get_runtime_settings') ? matrix_export_get_runtime_settings() : [];
+        $configured = '';
+        if (!empty($runtime_settings['node_binary'])) {
+            $configured = (string) $runtime_settings['node_binary'];
+        }
+        if ($configured === '' && defined('MATRIX_EXPORT_NODE_BINARY') && MATRIX_EXPORT_NODE_BINARY !== '') {
+            $configured = (string) MATRIX_EXPORT_NODE_BINARY;
+        }
         if ($configured === '' && function_exists('apply_filters')) {
             $configured = (string) apply_filters('matrix_export_node_binary', '');
         }
@@ -2056,6 +2061,11 @@ class Matrix_Export {
      * @return string
      */
     protected static function get_playwright_browsers_path($home_dir) {
+        $runtime_settings = function_exists('matrix_export_get_runtime_settings') ? matrix_export_get_runtime_settings() : [];
+        if (!empty($runtime_settings['playwright_browsers_path'])) {
+            $path = rtrim((string) $runtime_settings['playwright_browsers_path'], '/');
+            return $path !== '' ? $path : '';
+        }
         if (defined('MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH') && MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH !== '') {
             $path = rtrim((string) MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH, '/');
             return $path !== '' ? $path : '';

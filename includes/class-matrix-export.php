@@ -566,7 +566,7 @@ class Matrix_Export {
     /**
      * Return all saved client links keyed by token.
      *
-     * @return array<string, array{post_ids: array<int,int>, created_at: int, created_by: int, expires_at: int, reminder_days: int, custom_instructions: string}>
+     * @return array<string, array{post_ids: array<int,int>, created_at: int, created_by: int, expires_at: int, reminder_days: int, custom_instructions: string, requires_approval: bool}>
      */
     public static function get_client_links() {
         $links = get_option(self::CLIENT_LINKS_OPTION, []);
@@ -594,6 +594,7 @@ class Matrix_Export {
                 'expires_at'  => isset($entry['expires_at']) ? max(0, (int) $entry['expires_at']) : 0,
                 'reminder_days' => isset($entry['reminder_days']) ? max(0, (int) $entry['reminder_days']) : 0,
                 'custom_instructions' => isset($entry['custom_instructions']) ? wp_kses_post((string) $entry['custom_instructions']) : '',
+                'requires_approval' => !empty($entry['requires_approval']),
             ];
         }
         return $clean;
@@ -603,7 +604,7 @@ class Matrix_Export {
      * Generate and save a unique client link token for selected posts.
      *
      * @param array<int, int|string> $post_ids
-     * @param array{expires_days?: int, reminder_days?: int, custom_instructions?: string} $options
+     * @param array{expires_days?: int, reminder_days?: int, custom_instructions?: string, requires_approval?: bool|int|string} $options
      * @return string Token
      */
     public static function create_client_link(array $post_ids, array $options = []) {
@@ -614,6 +615,7 @@ class Matrix_Export {
         $expires_days = isset($options['expires_days']) ? max(0, (int) $options['expires_days']) : 0;
         $reminder_days = isset($options['reminder_days']) ? max(0, (int) $options['reminder_days']) : 0;
         $custom_instructions = isset($options['custom_instructions']) ? wp_kses_post((string) $options['custom_instructions']) : '';
+        $requires_approval = !empty($options['requires_approval']);
         $expires_at = $expires_days > 0 ? (time() + ($expires_days * DAY_IN_SECONDS)) : 0;
         $links = self::get_client_links();
         $token = bin2hex(random_bytes(24));
@@ -624,6 +626,7 @@ class Matrix_Export {
             'expires_at'  => $expires_at,
             'reminder_days' => $reminder_days,
             'custom_instructions' => $custom_instructions,
+            'requires_approval' => $requires_approval,
         ];
         update_option(self::CLIENT_LINKS_OPTION, $links, false);
         return $token;
@@ -715,6 +718,27 @@ class Matrix_Export {
     }
 
     /**
+     * Update moderation mode for an existing client link.
+     *
+     * @param string $token
+     * @param bool $requires_approval
+     * @return bool
+     */
+    public static function update_client_link_requires_approval($token, $requires_approval) {
+        $token = is_string($token) ? strtolower(trim($token)) : '';
+        if ($token === '') {
+            return false;
+        }
+        $links = self::get_client_links();
+        if (!isset($links[$token]) || !is_array($links[$token])) {
+            return false;
+        }
+        $links[$token]['requires_approval'] = (bool) $requires_approval;
+        update_option(self::CLIENT_LINKS_OPTION, $links, false);
+        return true;
+    }
+
+    /**
      * Remove all generated client links.
      *
      * @return void
@@ -789,7 +813,9 @@ class Matrix_Export {
                             $all_keys[] = $k;
                         }
                     }
-                    $all_rows[] = array_merge($base, $flat);
+                    $merged = array_merge($base, $flat);
+                    $merged['block_type'] = $layout;
+                    $all_rows[] = $merged;
                     $index++;
                 }
             }
@@ -1520,10 +1546,33 @@ class Matrix_Export {
 
     /**
      * Build anchor ID used on front-end for a given block source/index.
+     * When $block_type (ACF layout name) is provided, returns a theme-friendly id: layout-name-index (e.g. content-one-0, hero-0)
+     * so the theme can use the same formula: str_replace('_', '-', get_row_layout()) . '-' . get_row_index()
+     * Filter: matrix_export_block_anchor_id
+     *
+     * @param string $block_source ACF field name (e.g. flexible_content_blocks)
+     * @param int $block_index Row index
+     * @param string $block_type Optional. ACF layout name (e.g. content_one, hero). When set, anchor is layout-name-index.
      */
-    public static function get_block_anchor_id($block_source, $block_index) {
+    public static function get_block_anchor_id($block_source, $block_index, $block_type = '') {
+        $block_index = (int) $block_index;
+        if ($block_type !== '') {
+            $layout_slug = str_replace('_', '-', strtolower(preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $block_type)));
+            if ($layout_slug !== '') {
+                $row_index = $block_index + 1;
+                $anchor = $layout_slug . '-' . $row_index;
+                if (function_exists('apply_filters')) {
+                    $anchor = (string) apply_filters('matrix_export_block_anchor_id', $anchor, $block_source, $block_index, $block_type);
+                }
+                return $anchor !== '' ? $anchor : $layout_slug . '-' . $row_index;
+            }
+        }
         $source_slug = preg_replace('/[^a-z0-9_\-]/i', '', (string) $block_source);
-        return 'matrix-block-' . $source_slug . '-' . (int) $block_index;
+        $anchor = 'matrix-block-' . $source_slug . '-' . $block_index;
+        if (function_exists('apply_filters')) {
+            $anchor = (string) apply_filters('matrix_export_block_anchor_id', $anchor, $block_source, $block_index, $block_type);
+        }
+        return $anchor !== '' ? $anchor : 'matrix-block-' . $source_slug . '-' . $block_index;
     }
 
     /**
@@ -1575,7 +1624,7 @@ class Matrix_Export {
                 continue;
             }
             $permalink = self::normalize_url_for_current_request($permalink);
-            $anchor = self::get_block_anchor_id($source, $block_index);
+            $anchor = self::get_block_anchor_id($source, $block_index, $block_type);
             $source_slug = preg_replace('/[^a-z0-9_\-]/i', '', $source);
             $type_slug = preg_replace('/[^a-z0-9_\-]/i', '', strtolower($block_type));
             if ($type_slug === '') {
@@ -1672,7 +1721,7 @@ class Matrix_Export {
                 continue;
             }
             $permalink = self::normalize_url_for_current_request($permalink);
-            $anchor = self::get_block_anchor_id($source, $block_index);
+            $anchor = self::get_block_anchor_id($source, $block_index, $block_type);
             $source_slug = preg_replace('/[^a-z0-9_\-]/i', '', $source);
             $type_slug = preg_replace('/[^a-z0-9_\-]/i', '', strtolower($block_type));
             if ($type_slug === '') {
@@ -1705,11 +1754,18 @@ class Matrix_Export {
         $tmp_json = trailingslashit(sys_get_temp_dir()) . 'matrix-block-previews-sync-' . uniqid('', true) . '.json';
         file_put_contents($tmp_json, wp_json_encode($tasks));
         $home_dir = self::resolve_home_dir();
+        $browsers_path = self::get_playwright_browsers_path($home_dir);
         $env_prefix = '';
         if ($home_dir !== '') {
-            $env_prefix = 'HOME=' . escapeshellarg($home_dir) . ' PLAYWRIGHT_BROWSERS_PATH=' . escapeshellarg(self::get_playwright_browsers_path($home_dir)) . ' ';
+            $env_prefix = 'HOME=' . escapeshellarg($home_dir) . ' ';
         }
-        $cmd = $env_prefix . escapeshellarg($node_bin) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($tmp_json) . ' 2>&1';
+        if ($browsers_path !== '') {
+            $env_prefix .= 'PLAYWRIGHT_BROWSERS_PATH=' . escapeshellarg($browsers_path) . ' ';
+        }
+        $plugin_dir = defined('MATRIX_EXPORT_DIR') ? MATRIX_EXPORT_DIR : dirname(dirname(__FILE__)) . '/';
+        $plugin_dir_trimmed = rtrim($plugin_dir, '/');
+        $env_prefix .= 'NODE_PATH=' . escapeshellarg($plugin_dir_trimmed . '/node_modules') . ' ';
+        $cmd = 'cd ' . escapeshellarg($plugin_dir_trimmed) . ' && ' . $env_prefix . escapeshellarg($node_bin) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($tmp_json) . ' 2>&1';
         $output = @shell_exec($cmd);
         @unlink($tmp_json);
         $generated = 0;
@@ -1775,7 +1831,7 @@ class Matrix_Export {
                 continue;
             }
             $permalink = self::normalize_url_for_current_request($permalink);
-            $anchor = self::get_block_anchor_id($source, $block_index);
+            $anchor = self::get_block_anchor_id($source, $block_index, $block_type);
             $source_slug = preg_replace('/[^a-z0-9_\-]/i', '', $source);
             $type_slug = preg_replace('/[^a-z0-9_\-]/i', '', strtolower($block_type));
             if ($type_slug === '') {
@@ -1827,12 +1883,19 @@ class Matrix_Export {
         $tmp_json = trailingslashit(sys_get_temp_dir()) . 'matrix-block-previews-async-' . uniqid('', true) . '.json';
         file_put_contents($tmp_json, wp_json_encode($tasks));
         $home_dir = self::resolve_home_dir();
+        $browsers_path = self::get_playwright_browsers_path($home_dir);
         $env_prefix = '';
         if ($home_dir !== '') {
-            $env_prefix = 'HOME=' . escapeshellarg($home_dir) . ' PLAYWRIGHT_BROWSERS_PATH=' . escapeshellarg(self::get_playwright_browsers_path($home_dir)) . ' ';
+            $env_prefix = 'HOME=' . escapeshellarg($home_dir) . ' ';
         }
+        if ($browsers_path !== '') {
+            $env_prefix .= 'PLAYWRIGHT_BROWSERS_PATH=' . escapeshellarg($browsers_path) . ' ';
+        }
+        $plugin_dir = defined('MATRIX_EXPORT_DIR') ? MATRIX_EXPORT_DIR : dirname(dirname(__FILE__)) . '/';
+        $plugin_dir_trimmed = rtrim($plugin_dir, '/');
+        $env_prefix .= 'NODE_PATH=' . escapeshellarg($plugin_dir_trimmed . '/node_modules') . ' ';
         $runner_log = trailingslashit($preview_dir) . 'capture-runner.log';
-        $cmd = $env_prefix . escapeshellarg($node_bin) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($tmp_json) . ' ' . escapeshellarg($status_file) . ' >> ' . escapeshellarg($runner_log) . ' 2>&1 &';
+        $cmd = 'cd ' . escapeshellarg($plugin_dir_trimmed) . ' && ' . $env_prefix . escapeshellarg($node_bin) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($tmp_json) . ' ' . escapeshellarg($status_file) . ' >> ' . escapeshellarg($runner_log) . ' 2>&1 &';
         if (function_exists('exec')) {
             @exec($cmd);
         } else {
@@ -1916,11 +1979,23 @@ class Matrix_Export {
     }
 
     /**
-     * Resolve Node binary path in PHP runtime (including common nvm/homebrew locations).
+     * Resolve Node binary path in PHP runtime (including common nvm/homebrew/server locations).
+     * Server admins can set the path via wp-config.php: define('MATRIX_EXPORT_NODE_BINARY', '/path/to/node');
+     * or the filter 'matrix_export_node_binary'.
      *
      * @return string
      */
     protected static function resolve_node_binary() {
+        $configured = defined('MATRIX_EXPORT_NODE_BINARY') && MATRIX_EXPORT_NODE_BINARY !== ''
+            ? (string) MATRIX_EXPORT_NODE_BINARY
+            : '';
+        if ($configured === '' && function_exists('apply_filters')) {
+            $configured = (string) apply_filters('matrix_export_node_binary', '');
+        }
+        if ($configured !== '') {
+            return $configured;
+        }
+
         $candidates = [];
         $home = self::resolve_home_dir();
         if ($home !== '') {
@@ -1939,6 +2014,7 @@ class Matrix_Export {
         $candidates[] = '/opt/homebrew/bin/node';
         $candidates[] = '/usr/local/bin/node';
         $candidates[] = '/usr/bin/node';
+        $candidates[] = '/usr/local/node/bin/node';
         foreach (array_unique($candidates) as $bin) {
             if (is_string($bin) && $bin !== '' && is_file($bin) && is_executable($bin)) {
                 return $bin;
@@ -1974,11 +2050,22 @@ class Matrix_Export {
 
     /**
      * Resolve Playwright browser cache directory per OS.
+     * Server admins can set a path via wp-config.php: define('MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH', '/path/to/ms-playwright');
      *
      * @param string $home_dir
      * @return string
      */
     protected static function get_playwright_browsers_path($home_dir) {
+        if (defined('MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH') && MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH !== '') {
+            $path = rtrim((string) MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH, '/');
+            return $path !== '' ? $path : '';
+        }
+        if (function_exists('apply_filters')) {
+            $path = (string) apply_filters('matrix_export_playwright_browsers_path', '');
+            if ($path !== '') {
+                return rtrim($path, '/');
+            }
+        }
         $home_dir = rtrim((string) $home_dir, '/');
         if ($home_dir === '') {
             return '';

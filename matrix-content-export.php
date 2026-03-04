@@ -17,9 +17,11 @@ define('MATRIX_EXPORT_URL', plugin_dir_url(__FILE__));
 define('MATRIX_EXPORT_CLIENT_FORM_SLUG', 'content-editing');
 define('MATRIX_EXPORT_CLIENT_FORM_OPTION', 'matrix_export_client_form_post_ids');
 define('MATRIX_EXPORT_NOTIFY_EMAIL_OPTION', 'matrix_export_notify_email');
+define('MATRIX_EXPORT_REVIEW_NOTIFY_EMAIL_OPTION', 'matrix_export_review_notify_email');
 define('MATRIX_EXPORT_ADMIN_DUPLICATE_NOTIFY_EMAIL_OPTION', 'matrix_export_admin_duplicate_notify_email');
 define('MATRIX_EXPORT_DISABLED_FORM_FIELDS_OPTION', 'matrix_export_disabled_form_fields');
 define('MATRIX_EXPORT_DISABLED_BLOCKS_OPTION', 'matrix_export_disabled_blocks');
+define('MATRIX_EXPORT_PENDING_REVIEWS_OPTION', 'matrix_export_pending_reviews');
 /** Max size for image uploads in the client form (bytes). Default 2 MB. */
 define('MATRIX_EXPORT_MAX_IMAGE_UPLOAD_BYTES', 2 * 1024 * 1024);
 /** Max size for video uploads in the client form (bytes). Default 30 MB. */
@@ -48,6 +50,7 @@ add_action('manage_posts_custom_column', 'matrix_export_show_status_column', 10,
 add_action('admin_head-edit.php', 'matrix_export_status_column_styles');
 add_action('template_redirect', 'matrix_export_render_content_editing_form', 1);
 add_action('wp_footer', 'matrix_export_form_saved_notice');
+add_action('wp_footer', 'matrix_export_hash_anchor_resolver', 20);
 add_filter('show_admin_bar', 'matrix_export_hide_admin_bar_on_content_editing', 99);
 
 /**
@@ -189,6 +192,7 @@ function matrix_export_handle_actions() {
             $token = sanitize_text_field(wp_unslash($_POST['matrix_client_link_token']));
             $post_ids = Matrix_Export::get_client_link_post_ids($token, true);
             $deleted_previews = matrix_export_clear_cached_previews_for_posts($post_ids);
+            matrix_export_remove_pending_reviews_for_token($token);
             Matrix_Export::delete_client_link($token);
             wp_safe_redirect(add_query_arg([
                 'matrix_client_link_cleared' => '1',
@@ -208,12 +212,48 @@ function matrix_export_handle_actions() {
             ], wp_get_referer()));
             exit;
         }
+        if ($action === 'update_mode' && isset($_POST['matrix_client_link_token'])) {
+            $token = sanitize_text_field(wp_unslash($_POST['matrix_client_link_token']));
+            $mode = isset($_POST['matrix_client_link_mode']) ? sanitize_key(wp_unslash($_POST['matrix_client_link_mode'])) : 'publish';
+            $requires_approval = ($mode === 'approval');
+            $ok = Matrix_Export::update_client_link_requires_approval($token, $requires_approval);
+            wp_safe_redirect(add_query_arg([
+                'matrix_client_mode_updated' => $ok ? '1' : '0',
+            ], wp_get_referer()));
+            exit;
+        }
         if ($action === 'clear_all') {
             $deleted_previews = matrix_export_clear_cached_previews();
             Matrix_Export::clear_client_links();
+            delete_option(MATRIX_EXPORT_PENDING_REVIEWS_OPTION);
             wp_safe_redirect(add_query_arg([
                 'matrix_client_link_cleared_all' => '1',
                 'matrix_previews_deleted' => (int) $deleted_previews,
+            ], wp_get_referer()));
+            exit;
+        }
+    }
+
+    if (
+        isset($_POST['matrix_reviews_action_nonce'], $_POST['matrix_reviews_action']) &&
+        wp_verify_nonce($_POST['matrix_reviews_action_nonce'], 'matrix_reviews_action')
+    ) {
+        $action = sanitize_key(wp_unslash($_POST['matrix_reviews_action']));
+        $submission_id = isset($_POST['matrix_review_submission_id']) ? sanitize_text_field(wp_unslash($_POST['matrix_review_submission_id'])) : '';
+        $review_note = isset($_POST['matrix_review_note']) ? sanitize_text_field(wp_unslash($_POST['matrix_review_note'])) : '';
+        if ($submission_id !== '' && $action === 'approve') {
+            $result = matrix_export_approve_pending_review($submission_id, $review_note);
+            wp_safe_redirect(add_query_arg([
+                'matrix_review_approved' => !empty($result['success']) ? '1' : '0',
+                'matrix_review_message' => rawurlencode(isset($result['message']) ? (string) $result['message'] : ''),
+            ], wp_get_referer()));
+            exit;
+        }
+        if ($submission_id !== '' && $action === 'reject') {
+            $result = matrix_export_reject_pending_review($submission_id, $review_note);
+            wp_safe_redirect(add_query_arg([
+                'matrix_review_rejected' => !empty($result['success']) ? '1' : '0',
+                'matrix_review_message' => rawurlencode(isset($result['message']) ? (string) $result['message'] : ''),
             ], wp_get_referer()));
             exit;
         }
@@ -284,6 +324,14 @@ function matrix_export_handle_actions() {
                 delete_option(MATRIX_EXPORT_NOTIFY_EMAIL_OPTION);
             }
         }
+        if (isset($_POST['matrix_review_notify_email'])) {
+            $review_notify_email = sanitize_email(wp_unslash($_POST['matrix_review_notify_email']));
+            if ($review_notify_email !== '') {
+                update_option(MATRIX_EXPORT_REVIEW_NOTIFY_EMAIL_OPTION, $review_notify_email);
+            } else {
+                delete_option(MATRIX_EXPORT_REVIEW_NOTIFY_EMAIL_OPTION);
+            }
+        }
         $post_ids = isset($_POST['matrix_export_post_ids']) && is_array($_POST['matrix_export_post_ids'])
             ? array_map('intval', $_POST['matrix_export_post_ids'])
             : [];
@@ -293,10 +341,12 @@ function matrix_export_handle_actions() {
             $expires_days = isset($_POST['matrix_client_link_expires_days']) ? max(0, (int) $_POST['matrix_client_link_expires_days']) : 0;
             $reminder_days = isset($_POST['matrix_client_link_reminder_days']) ? max(0, (int) $_POST['matrix_client_link_reminder_days']) : 0;
             $custom_instructions = isset($_POST['matrix_client_custom_instructions']) ? wp_kses_post(wp_unslash((string) $_POST['matrix_client_custom_instructions'])) : '';
+            $requires_approval = !empty($_POST['matrix_client_requires_approval']);
             $token = Matrix_Export::create_client_link($post_ids, [
                 'expires_days' => $expires_days,
                 'reminder_days' => $reminder_days,
                 'custom_instructions' => $custom_instructions,
+                'requires_approval' => $requires_approval,
             ]);
             if ($token !== '') {
                 $redirect = add_query_arg(
@@ -596,6 +646,220 @@ function matrix_export_normalize_acf_value_for_save($value) {
 }
 
 /**
+ * Get pending moderated submissions keyed by submission ID.
+ *
+ * @return array<string, array<string,mixed>>
+ */
+function matrix_export_get_pending_reviews() {
+    $reviews = get_option(MATRIX_EXPORT_PENDING_REVIEWS_OPTION, []);
+    return is_array($reviews) ? $reviews : [];
+}
+
+/**
+ * Persist pending moderated submissions.
+ *
+ * @param array<string, array<string,mixed>> $reviews
+ * @return void
+ */
+function matrix_export_save_pending_reviews(array $reviews) {
+    update_option(MATRIX_EXPORT_PENDING_REVIEWS_OPTION, $reviews, false);
+}
+
+/**
+ * Remove pending submissions for a specific token.
+ *
+ * @param string $token
+ * @return int number removed
+ */
+function matrix_export_remove_pending_reviews_for_token($token) {
+    $token = sanitize_text_field((string) $token);
+    if ($token === '') {
+        return 0;
+    }
+    $reviews = matrix_export_get_pending_reviews();
+    $removed = 0;
+    foreach ($reviews as $id => $entry) {
+        $entry_token = isset($entry['token']) ? (string) $entry['token'] : '';
+        if ($entry_token !== $token) {
+            continue;
+        }
+        unset($reviews[$id]);
+        $removed++;
+    }
+    if ($removed > 0) {
+        matrix_export_save_pending_reviews($reviews);
+    }
+    return $removed;
+}
+
+/**
+ * Queue a moderated submission for admin approval instead of publishing immediately.
+ *
+ * @param string $token
+ * @param array $post_data
+ * @return array{success: bool, message: string}
+ */
+function matrix_export_queue_pending_review($token, array $post_data) {
+    $token = sanitize_text_field((string) $token);
+    if ($token === '') {
+        return ['success' => false, 'message' => 'Missing token.'];
+    }
+    $entry = Matrix_Export::get_client_link_entry($token);
+    if (empty($entry)) {
+        return ['success' => false, 'message' => 'Invalid or expired link.'];
+    }
+    $clean = wp_unslash($post_data);
+    $clean['matrix_form_token'] = $token;
+    $clean['matrix_submit_mode'] = 'publish';
+    $clean['matrix_form_submit'] = '1';
+    unset($clean['matrix_export_nonce'], $clean['matrix_import_nonce']);
+
+    $post_ids = Matrix_Export::get_client_link_post_ids($token);
+    $reviews = matrix_export_get_pending_reviews();
+    $submission_id = substr(bin2hex(random_bytes(16)), 0, 24);
+    $reviews[$submission_id] = [
+        'submission_id' => $submission_id,
+        'token' => $token,
+        'post_ids' => array_values(array_unique(array_map('intval', $post_ids))),
+        'created_at' => time(),
+        'created_by' => (int) get_current_user_id(),
+        'created_by_email' => (function_exists('wp_get_current_user') && wp_get_current_user()) ? (string) wp_get_current_user()->user_email : '',
+        'status' => 'pending',
+        'post_data' => $clean,
+    ];
+    matrix_export_save_pending_reviews($reviews);
+    matrix_export_send_pending_review_notification($reviews[$submission_id]);
+
+    return ['success' => true, 'message' => 'Submission sent for review.'];
+}
+
+/**
+ * Approve and publish a pending moderated submission.
+ *
+ * @param string $submission_id
+ * @return array{success: bool, message: string}
+ */
+function matrix_export_approve_pending_review($submission_id, $review_note = '') {
+    $submission_id = sanitize_text_field((string) $submission_id);
+    $review_note = sanitize_text_field((string) $review_note);
+    $reviews = matrix_export_get_pending_reviews();
+    if ($submission_id === '' || empty($reviews[$submission_id]) || !is_array($reviews[$submission_id])) {
+        return ['success' => false, 'message' => 'Submission not found.'];
+    }
+    $submission = $reviews[$submission_id];
+    $post_data = isset($submission['post_data']) && is_array($submission['post_data']) ? $submission['post_data'] : [];
+    if (empty($post_data)) {
+        return ['success' => false, 'message' => 'Submission payload missing.'];
+    }
+    $result = Matrix_Import::handle_form_submit($post_data, [], 'publish');
+    if (empty($result['success'])) {
+        $msg = isset($result['message']) ? (string) $result['message'] : 'Failed to publish pending submission.';
+        return ['success' => false, 'message' => $msg];
+    }
+    matrix_export_send_review_decision_notification($submission, 'approved', $review_note);
+    unset($reviews[$submission_id]);
+    matrix_export_save_pending_reviews($reviews);
+    return ['success' => true, 'message' => 'Submission approved and published.'];
+}
+
+/**
+ * Reject and remove a pending moderated submission.
+ *
+ * @param string $submission_id
+ * @return array{success: bool, message: string}
+ */
+function matrix_export_reject_pending_review($submission_id, $review_note = '') {
+    $submission_id = sanitize_text_field((string) $submission_id);
+    $review_note = sanitize_text_field((string) $review_note);
+    $reviews = matrix_export_get_pending_reviews();
+    if ($submission_id === '' || empty($reviews[$submission_id]) || !is_array($reviews[$submission_id])) {
+        return ['success' => false, 'message' => 'Submission not found.'];
+    }
+    $submission = $reviews[$submission_id];
+    matrix_export_send_review_decision_notification($submission, 'rejected', $review_note);
+    unset($reviews[$submission_id]);
+    matrix_export_save_pending_reviews($reviews);
+    return ['success' => true, 'message' => $review_note !== '' ? ('Submission rejected. Note: ' . $review_note) : 'Submission rejected.'];
+}
+
+/**
+ * Notify admin when moderated content is submitted.
+ *
+ * @param array<string,mixed> $submission
+ * @return void
+ */
+function matrix_export_send_pending_review_notification(array $submission) {
+    $to = sanitize_email((string) get_option(MATRIX_EXPORT_REVIEW_NOTIFY_EMAIL_OPTION, ''));
+    if ($to === '' || !is_email($to)) {
+        $to = sanitize_email((string) get_option(MATRIX_EXPORT_NOTIFY_EMAIL_OPTION, ''));
+    }
+    if ($to === '' || !is_email($to)) {
+        return;
+    }
+    $token = isset($submission['token']) ? (string) $submission['token'] : '';
+    $submission_id = isset($submission['submission_id']) ? (string) $submission['submission_id'] : '';
+    $post_ids = isset($submission['post_ids']) && is_array($submission['post_ids']) ? array_map('intval', $submission['post_ids']) : [];
+    $titles = [];
+    foreach ($post_ids as $pid) {
+        $title = get_the_title($pid);
+        $titles[] = (is_string($title) && $title !== '') ? $title : ('Post #' . $pid);
+    }
+    $review_url = admin_url('tools.php?page=matrix-content-export');
+    $subject = '[' . wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES) . '] Content approval required';
+    $body = "A client submission is pending review.\n\n";
+    $body .= 'Submitted: ' . wp_date('Y-m-d H:i:s') . "\n";
+    if ($submission_id !== '') {
+        $body .= 'Submission ID: ' . $submission_id . "\n";
+    }
+    if ($token !== '') {
+        $body .= 'Token: ' . $token . "\n";
+    }
+    if (!empty($titles)) {
+        $body .= 'Pages/Posts: ' . implode(', ', $titles) . "\n";
+    }
+    $body .= 'Review queue: ' . $review_url . "\n";
+    wp_mail($to, $subject, $body, ['Content-Type: text/plain; charset=UTF-8']);
+}
+
+/**
+ * Notify the submitter when moderation decision is made.
+ *
+ * @param array<string,mixed> $submission
+ * @param string $decision approved|rejected
+ * @param string $note
+ * @return void
+ */
+function matrix_export_send_review_decision_notification(array $submission, $decision, $note = '') {
+    $to = isset($submission['created_by_email']) ? sanitize_email((string) $submission['created_by_email']) : '';
+    if ($to === '' || !is_email($to)) {
+        return;
+    }
+    $decision = ($decision === 'approved') ? 'approved' : 'rejected';
+    $token = isset($submission['token']) ? (string) $submission['token'] : '';
+    $post_ids = isset($submission['post_ids']) && is_array($submission['post_ids']) ? array_map('intval', $submission['post_ids']) : [];
+    $titles = [];
+    foreach ($post_ids as $pid) {
+        $title = get_the_title($pid);
+        $titles[] = (is_string($title) && $title !== '') ? $title : ('Post #' . $pid);
+    }
+    $subject = '[' . wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES) . '] Submission ' . $decision;
+    $body = "Your content submission has been " . $decision . ".\n\n";
+    if ($token !== '') {
+        $body .= 'Token: ' . $token . "\n";
+    }
+    if (!empty($titles)) {
+        $body .= 'Pages/Posts: ' . implode(', ', $titles) . "\n";
+    }
+    if (is_string($note) && $note !== '') {
+        $body .= 'Reviewer note: ' . $note . "\n";
+    }
+    if ($token !== '') {
+        $body .= 'Open form: ' . Matrix_Export::get_client_link_url($token) . "\n";
+    }
+    wp_mail($to, $subject, $body, ['Content-Type: text/plain; charset=UTF-8']);
+}
+
+/**
  * Email notification when a page/post is duplicated from the client form.
  *
  * @param int $source_post_id
@@ -679,12 +943,30 @@ function matrix_export_handle_client_form_submit() {
         );
     }
     $active_page = isset($_POST['matrix_active_page']) ? (int) $_POST['matrix_active_page'] : 0;
+    $token = isset($_POST['matrix_form_token']) ? sanitize_text_field(wp_unslash($_POST['matrix_form_token'])) : '';
     $submit_mode = isset($_POST['matrix_submit_mode']) ? sanitize_key(wp_unslash($_POST['matrix_submit_mode'])) : 'publish';
     if ($submit_mode !== 'draft' && $submit_mode !== 'later') {
         $submit_mode = 'publish';
     }
     if ($submit_mode === 'draft') {
         $submit_mode = 'later';
+    }
+    $entry = Matrix_Export::get_client_link_entry($token);
+    $requires_approval = !empty($entry['requires_approval']);
+    if ($submit_mode === 'publish' && $requires_approval) {
+        $queued = matrix_export_queue_pending_review($token, $_POST);
+        if (!$queued['success']) {
+            wp_die(esc_html($queued['message']), 'Content form', ['response' => 400, 'back_link' => true]);
+        }
+        $redirect = home_url('/' . MATRIX_EXPORT_CLIENT_FORM_SLUG . '/');
+        $redirect = add_query_arg('matrix_form_saved', '1', $redirect);
+        $redirect = add_query_arg('matrix_form_saved_mode', 'pending', $redirect);
+        $redirect = add_query_arg('matrix_token', rawurlencode($token), $redirect);
+        if ($active_page > 0) {
+            $redirect = add_query_arg('matrix_page', $active_page, $redirect);
+        }
+        wp_safe_redirect($redirect);
+        exit;
     }
     $result = Matrix_Import::handle_form_submit($_POST, isset($_FILES) ? $_FILES : [], $submit_mode);
     if ($result['success'] && !empty($result['redirect'])) {
@@ -767,11 +1049,55 @@ function matrix_export_form_saved_notice() {
         return;
     }
     $saved_mode = isset($_GET['matrix_form_saved_mode']) ? sanitize_key(wp_unslash($_GET['matrix_form_saved_mode'])) : 'publish';
-    $notice_text = ($saved_mode === 'later' || $saved_mode === 'draft')
-        ? 'Form saved for later editing. Changes were not published.'
-        : 'Content saved successfully. You can close this page.';
+    if ($saved_mode === 'pending') {
+        $notice_text = 'Submitted for approval. Changes will be published after admin review.';
+    } else {
+        $notice_text = ($saved_mode === 'later' || $saved_mode === 'draft')
+            ? 'Form saved for later editing. Changes were not published.'
+            : 'Content saved successfully. You can close this page.';
+    }
     echo '<div id="matrix-form-saved-notice" style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#00a32a;color:#fff;padding:12px 24px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:999999;font-size:14px;">' . esc_html($notice_text) . '</div>';
     echo '<script>setTimeout(function(){ var e=document.getElementById("matrix-form-saved-notice"); if(e) e.remove(); }, 5000);</script>';
+}
+
+/**
+ * If URL hash doesn't match an element id, fall back to matching [data-matrix-block="<hash>"].
+ * This keeps "View Section" links working when themes use non-deterministic section IDs.
+ */
+function matrix_export_hash_anchor_resolver() {
+    if (is_admin()) {
+        return;
+    }
+    ?>
+    <script>
+    (function () {
+      var decodeHash = function () {
+        if (!window.location.hash || window.location.hash.length < 2) return '';
+        try { return decodeURIComponent(window.location.hash.slice(1)); } catch (e) { return window.location.hash.slice(1); }
+      };
+      var cssEscape = function (value) {
+        if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
+        return String(value).replace(/["\\]/g, '\\$&');
+      };
+      var resolveHashTarget = function () {
+        var raw = decodeHash();
+        if (!raw) return;
+        if (document.getElementById(raw)) return;
+        var selector = '[data-matrix-block="' + cssEscape(raw) + '"]';
+        var target = document.querySelector(selector);
+        if (!target) return;
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      };
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', resolveHashTarget, { once: true });
+      } else {
+        resolveHashTarget();
+      }
+      window.addEventListener('load', resolveHashTarget, { once: true });
+      window.addEventListener('hashchange', resolveHashTarget);
+    })();
+    </script>
+    <?php
 }
 
 /**
@@ -880,7 +1206,13 @@ function matrix_export_render_page() {
     }
     $show_client_link = isset($_GET['matrix_client_link']);
     $client_links = Matrix_Export::get_client_links();
+    $pending_reviews = matrix_export_get_pending_reviews();
     uasort($client_links, function ($a, $b) {
+        $a_created = isset($a['created_at']) ? (int) $a['created_at'] : 0;
+        $b_created = isset($b['created_at']) ? (int) $b['created_at'] : 0;
+        return $b_created <=> $a_created;
+    });
+    uasort($pending_reviews, function ($a, $b) {
         $a_created = isset($a['created_at']) ? (int) $a['created_at'] : 0;
         $b_created = isset($b['created_at']) ? (int) $b['created_at'] : 0;
         return $b_created <=> $a_created;

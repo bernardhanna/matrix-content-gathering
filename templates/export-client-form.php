@@ -19,6 +19,7 @@ $client_link_expires_at = isset($data['client_link_expires_at']) ? (int) $data['
 $client_link_reminder_days = isset($data['client_link_reminder_days']) ? (int) $data['client_link_reminder_days'] : 0;
 $client_link_created_at = isset($data['client_link_created_at']) ? (int) $data['client_link_created_at'] : 0;
 $client_custom_instructions = isset($data['client_custom_instructions']) ? (string) $data['client_custom_instructions'] : '';
+$client_requires_approval = !empty($data['client_requires_approval']);
 $site_name = function_exists('get_bloginfo') ? (string) get_bloginfo('name') : '';
 $block_preview_urls = $is_on_site ? Matrix_Export::ensure_block_preview_urls($rows) : [];
 $has_previewable_blocks = false;
@@ -443,6 +444,9 @@ if (!$in_theme) : ?>
             </div>
             <div class="matrix-instructions-body">
                 <p>This form is pre-filled with the current content from the site. Use the dropdown above to switch between pages. Edit the fields, then use Save content back to site or Save for later.</p>
+                <?php if ($client_requires_approval) : ?>
+                    <p style="margin-top:0.5rem;"><strong>Approval mode:</strong> submitting updates sends them for admin review before anything is published live.</p>
+                <?php endif; ?>
                 <?php if ($client_custom_instructions !== '') : ?>
                     <hr />
                     <h3 style="margin:0 0 0.35rem;color:#21282f;font-size:0.98rem;">Project-specific instructions</h3>
@@ -454,20 +458,20 @@ if (!$in_theme) : ?>
     <div class="matrix-review-modal" id="matrix-review-modal" role="dialog" aria-modal="true" aria-labelledby="matrix-review-title">
         <div class="matrix-review-dialog">
             <div class="matrix-review-head">
-                <h2 id="matrix-review-title">Review changes before publishing</h2>
+                <h2 id="matrix-review-title"><?php echo $client_requires_approval ? 'Review changes before submitting' : 'Review changes before publishing'; ?></h2>
                 <button type="button" class="matrix-instructions-close" id="matrix-review-cancel-top">Close</button>
             </div>
             <div class="matrix-review-body">
-                <p>You are about to update the live site. Please confirm these changes:</p>
+                <p><?php echo $client_requires_approval ? 'You are about to submit changes for admin approval. Please confirm these changes:' : 'You are about to update the live site. Please confirm these changes:'; ?></p>
                 <ul id="matrix-review-list"></ul>
                 <div class="matrix-review-actions">
                     <button type="button" id="matrix-review-cancel">Cancel</button>
-                    <button type="button" class="primary" id="matrix-review-confirm">Publish now</button>
+                    <button type="button" class="primary" id="matrix-review-confirm"><?php echo $client_requires_approval ? 'Submit for approval' : 'Publish now'; ?></button>
                 </div>
             </div>
         </div>
     </div>
-    <form method="post" action="<?php echo esc_url($form_action); ?>" id="matrix-client-form" enctype="multipart/form-data" class="matrix-client-form" novalidate aria-label="Client content editing form"<?php if (isset($data['matrix_save_status_ajax_url'], $data['matrix_save_status_nonce']) && $data['matrix_save_status_ajax_url'] !== '' && $data['matrix_save_status_nonce'] !== '') : ?> data-matrix-save-status-url="<?php echo esc_url($data['matrix_save_status_ajax_url']); ?>" data-matrix-save-status-nonce="<?php echo esc_attr($data['matrix_save_status_nonce']); ?>"<?php endif; ?><?php if (isset($data['matrix_autosave_draft_ajax_url'], $data['matrix_autosave_draft_nonce']) && $data['matrix_autosave_draft_ajax_url'] !== '' && $data['matrix_autosave_draft_nonce'] !== '') : ?> data-matrix-autosave-url="<?php echo esc_url($data['matrix_autosave_draft_ajax_url']); ?>" data-matrix-autosave-nonce="<?php echo esc_attr($data['matrix_autosave_draft_nonce']); ?>" data-matrix-autosave-interval-ms="75000"<?php endif; ?><?php if (isset($data['matrix_duplicate_page_ajax_url'], $data['matrix_duplicate_page_nonce']) && $data['matrix_duplicate_page_ajax_url'] !== '' && $data['matrix_duplicate_page_nonce'] !== '') : ?> data-matrix-duplicate-url="<?php echo esc_url($data['matrix_duplicate_page_ajax_url']); ?>" data-matrix-duplicate-nonce="<?php echo esc_attr($data['matrix_duplicate_page_nonce']); ?>"<?php endif; ?>>
+    <form method="post" action="<?php echo esc_url($form_action); ?>" id="matrix-client-form" enctype="multipart/form-data" class="matrix-client-form" novalidate aria-label="Client content editing form" data-matrix-requires-approval="<?php echo $client_requires_approval ? '1' : '0'; ?>"<?php if (isset($data['matrix_save_status_ajax_url'], $data['matrix_save_status_nonce']) && $data['matrix_save_status_ajax_url'] !== '' && $data['matrix_save_status_nonce'] !== '') : ?> data-matrix-save-status-url="<?php echo esc_url($data['matrix_save_status_ajax_url']); ?>" data-matrix-save-status-nonce="<?php echo esc_attr($data['matrix_save_status_nonce']); ?>"<?php endif; ?><?php if (isset($data['matrix_autosave_draft_ajax_url'], $data['matrix_autosave_draft_nonce']) && $data['matrix_autosave_draft_ajax_url'] !== '' && $data['matrix_autosave_draft_nonce'] !== '') : ?> data-matrix-autosave-url="<?php echo esc_url($data['matrix_autosave_draft_ajax_url']); ?>" data-matrix-autosave-nonce="<?php echo esc_attr($data['matrix_autosave_draft_nonce']); ?>" data-matrix-autosave-interval-ms="75000"<?php endif; ?><?php if (isset($data['matrix_duplicate_page_ajax_url'], $data['matrix_duplicate_page_nonce']) && $data['matrix_duplicate_page_ajax_url'] !== '' && $data['matrix_duplicate_page_nonce'] !== '') : ?> data-matrix-duplicate-url="<?php echo esc_url($data['matrix_duplicate_page_ajax_url']); ?>" data-matrix-duplicate-nonce="<?php echo esc_attr($data['matrix_duplicate_page_nonce']); ?>"<?php endif; ?>>
         <input type="hidden" name="matrix_form_token" value="<?php echo esc_attr($token); ?>" />
         <input type="hidden" name="matrix_form_submit" value="1" />
         <input type="hidden" name="matrix_active_page" value="<?php echo $draft_active_page > 0 ? $draft_active_page : (!empty($page_order) ? (int) $page_order[0] : 0); ?>" />
@@ -522,12 +526,11 @@ if (!$in_theme) : ?>
                         <?php
                         $preview_url = '';
                         if ($block_source !== Matrix_Export::POST_FIELDS_SOURCE && function_exists('get_permalink')) {
-                            $source_slug = preg_replace('/[^a-z0-9_\-]/i', '', (string) $block_source);
-                            $anchor = 'matrix-block-' . $source_slug . '-' . (int) $block_index;
+                            $anchor = Matrix_Export::get_block_anchor_id($block_source, (int) $block_index, (string) $block_type);
                             $preview_url = get_permalink((int) $post_id);
                             if ($preview_url) {
                                 $preview_url = Matrix_Export::normalize_url_for_current_request($preview_url);
-                                $preview_url = add_query_arg('matrix_preview', '1', $preview_url);
+                                $preview_url = remove_query_arg('matrix_preview', $preview_url);
                                 $preview_url .= '#' . $anchor;
                             }
                         }
@@ -773,7 +776,7 @@ if (!$in_theme) : ?>
 
         <div class="submit-wrap">
             <div class="submit-actions">
-                <button type="submit" data-submit-mode="publish">Update site content</button>
+                <button type="submit" data-submit-mode="publish"><?php echo $client_requires_approval ? 'Submit for approval' : 'Update site content'; ?></button>
                 <button type="submit" class="secondary" data-submit-mode="later">Save for later</button>
             </div>
             <p>Your browser will send the form to the website. Make sure you are connected to the internet.</p>
@@ -808,6 +811,7 @@ if (!$in_theme) : ?>
         var topStatusDoneBy = document.getElementById('matrix-top-status-done-by');
         var autosaveUrl = form ? form.getAttribute('data-matrix-autosave-url') : '';
         var autosaveNonce = form ? form.getAttribute('data-matrix-autosave-nonce') : '';
+        var requiresApproval = form ? String(form.getAttribute('data-matrix-requires-approval') || '0') === '1' : false;
         var duplicateUrl = form ? form.getAttribute('data-matrix-duplicate-url') : '';
         var duplicateNonce = form ? form.getAttribute('data-matrix-duplicate-nonce') : '';
         var autosaveIntervalMs = form ? parseInt(form.getAttribute('data-matrix-autosave-interval-ms'), 10) : 75000;
@@ -965,7 +969,13 @@ if (!$in_theme) : ?>
             if (!submitProgressEl) return;
             submitProgressEl.classList.add('matrix-visible');
             if (submitProgressLink) submitProgressLink.href = window.location.href;
-            submitProgressEl.firstChild.textContent = mode === 'later' ? 'Saving draft... Please keep this tab open. ' : 'Saving live updates... Please keep this tab open. ';
+            if (mode === 'later') {
+                submitProgressEl.firstChild.textContent = 'Saving draft... Please keep this tab open. ';
+                return;
+            }
+            submitProgressEl.firstChild.textContent = requiresApproval
+                ? 'Submitting for approval... Please keep this tab open. '
+                : 'Saving live updates... Please keep this tab open. ';
         }
         function setDraftStatus(text) {
             if (draftSaveStatusEl && text) draftSaveStatusEl.textContent = text;

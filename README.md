@@ -22,6 +22,10 @@ It is designed for sites using ACF Flexible Content blocks (e.g. matrix-starter)
 - **Optional email notifications**
   - on client save (changed fields summary)
   - on client duplication
+  - separate moderation notification email for approval-required submissions
+- **Optional per-link moderation**
+  - keep default publish-on-submit behavior
+  - or require admin approval before client submissions are published
 - **Field visibility settings**: hide specific fields from the client editing form (filterable by selected pages/post types + searchable)
 - **Import CSV** to update ACF flexible content blocks
 
@@ -74,6 +78,8 @@ Use **Hide fields on the client form** to control what clients can edit.
 3. Send the generated URL to the client.
 
 The URL contains a token (`matrix_token`) that controls which pages/posts appear in the form.
+If needed for sensitive clients, enable **Require approval before publishing** when generating the link. This is off by default.
+When moderation is enabled, submissions appear in **Pending reviews** in the admin page, where you can approve/publish or reject with an optional review note.
 
 ### Access control
 
@@ -139,6 +145,88 @@ Upload a CSV exported from this plugin to update content.
 ### Fields appear that you don’t want clients editing
 
 Use **Hide fields on the client form** in the admin page. The client form will respect those settings automatically.
+
+### “Node.js is not available to PHP runtime” / Screenshot generation unavailable
+
+Section screenshot generation (block previews in the workbook) requires **Node.js**, the **Playwright** npm package, and the **Chromium** browser on the server. You can:
+
+- **Ignore it** – screenshot generation is optional; the rest of the plugin works without it.
+- **Enable it on the server** (SSH as root or the web server user):
+
+If you see this notice in the admin UI:
+
+> Screenshot generation is not available in this environment. Node.js is not available to PHP runtime.
+>
+> Section previews are optional. If Node.js is installed on the server but not in the web server's PATH, add to wp-config.php:
+> `define('MATRIX_EXPORT_NODE_BINARY', '/path/to/node');`
+
+follow the steps below.
+
+Example `wp-config.php` overrides:
+
+```php
+define('MATRIX_EXPORT_NODE_BINARY', '/opt/node-20/bin/node');
+define('MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH', '/root/.cache/ms-playwright');
+
+// Optional quick debug line to verify constants are loaded.
+file_put_contents(
+    __DIR__ . '/matrix-export-debug.log',
+    'NODE: ' . (defined('MATRIX_EXPORT_NODE_BINARY') ? MATRIX_EXPORT_NODE_BINARY : 'not set') . "\n",
+    FILE_APPEND
+);
+```
+
+  1. **Set the Node path** in `wp-config.php` if the web server user doesn’t have `node` in PATH:
+     ```php
+     define('MATRIX_EXPORT_NODE_BINARY', '/usr/bin/node');
+     ```
+     Find the path with `which node` over SSH.
+
+  2. **Install dependencies and Chromium** in the plugin directory, **as the user that runs PHP** (e.g. `www-data`, `apache`, or the site’s system user), so that `node_modules` and the browser cache are readable by the web server:
+     ```bash
+     cd /var/www/vhosts/…/wp-content/plugins/matrix-content-export
+     npm install
+     npx playwright install chromium
+     ```
+     If you’re SSH’d as root, run as the web user instead:
+     ```bash
+     sudo -u www-data bash -c 'cd /var/www/vhosts/…/wp-content/plugins/matrix-content-export && npm install && npx playwright install chromium'
+     ```
+     Replace `www-data` and the path with your server’s web user and plugin path.
+
+  3. **Optional:** If the browser cache must live in a specific directory (e.g. a shared path), install Chromium there and tell the plugin in `wp-config.php`:
+     ```php
+     define('MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH', '/var/www/playwright-browsers');
+     ```
+     Then run `npx playwright install chromium` with `PLAYWRIGHT_BROWSERS_PATH=/var/www/playwright-browsers` (and ensure the web user can read that directory).
+
+### Screenshots show the wrong section / "View section" link doesn't scroll
+
+Section previews and **View section** links resolve blocks by anchor (`layout-name-index`, e.g. `callout-2`).
+
+Recommended theme markup:
+
+- Keep your normal section `id` (deterministic or random).
+- Add a stable `data-matrix-block` attribute using layout + ACF row index:
+  - `data-matrix-block="<?php echo esc_attr(str_replace('_', '-', get_row_layout()) . '-' . get_row_index()); ?>"`
+
+Example:
+
+```php
+<section
+  id="<?php echo esc_attr($section_id); ?>"
+  data-matrix-block="<?php echo esc_attr(str_replace('_', '-', get_row_layout()) . '-' . get_row_index()); ?>"
+>
+```
+
+Why this works:
+
+- Screenshot capture now checks `data-matrix-block` first.
+- Front-end hash resolving falls back to `data-matrix-block` when no matching `id` exists.
+
+So `/#callout-2` still scrolls correctly even if your actual section `id` is random like `our-people-8109`.
+
+**Filter:** Change the anchor with the `matrix_export_block_anchor_id` filter if you need a different scheme.
 
 ## Developer notes
 

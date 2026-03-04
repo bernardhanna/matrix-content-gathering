@@ -8,6 +8,7 @@ $post_types = Matrix_Export::get_available_post_types();
 $all_posts  = Matrix_Export::get_posts_for_selection();
 $admin_duplicate_notify_email = get_option(MATRIX_EXPORT_ADMIN_DUPLICATE_NOTIFY_EMAIL_OPTION, '');
 $notify_email = get_option(MATRIX_EXPORT_NOTIFY_EMAIL_OPTION, '');
+$review_notify_email = get_option(MATRIX_EXPORT_REVIEW_NOTIFY_EMAIL_OPTION, '');
 $all_form_field_keys = Matrix_Export::get_all_content_field_keys();
 $form_field_post_types_map = Matrix_Export::get_content_field_key_post_types_map();
 $disabled_form_field_keys = Matrix_Export::get_disabled_form_fields();
@@ -51,7 +52,13 @@ foreach ($all_posts as $post) {
                 <p id="matrix-preview-failure-text" style="margin:0.4rem 0 0 0;color:#646970;"></p>
             </div>
         <?php else : ?>
-            <div class="notice notice-warning"><p>Could not start screenshot generation in this environment. <?php echo isset($_GET['matrix_previews_reason']) ? esc_html(wp_unslash($_GET['matrix_previews_reason'])) : ''; ?></p></div>
+            <?php
+            $reason = isset($_GET['matrix_previews_reason']) ? esc_html(wp_unslash($_GET['matrix_previews_reason'])) : '';
+            ?>
+            <div class="notice notice-warning">
+                <p><strong>Screenshot generation is not available in this environment.</strong> <?php echo $reason; ?></p>
+                <p class="description" style="margin: 0.5rem 0 0 0;">Section previews are optional. If Node.js is installed on the server but not in the web server&rsquo;s PATH, add to <code>wp-config.php</code>: <code>define('MATRIX_EXPORT_NODE_BINARY', '/path/to/node');</code></p>
+            </div>
         <?php endif; ?>
     <?php endif; ?>
     <?php if (isset($_GET['matrix_previews_refreshed']) && $_GET['matrix_previews_refreshed'] === '1') :
@@ -60,6 +67,18 @@ foreach ($all_posts as $post) {
         $tasks = isset($_GET['matrix_previews_tasks']) ? (int) $_GET['matrix_previews_tasks'] : 0;
     ?>
         <div class="notice notice-success"><p>Section screenshots refreshed. Cleared <?php echo (int) $deleted; ?> cached file(s), generated <?php echo (int) $generated; ?> of <?php echo (int) $tasks; ?> screenshot(s).</p></div>
+    <?php endif; ?>
+    <?php if (isset($_GET['matrix_review_approved'])) : ?>
+        <?php $ok = $_GET['matrix_review_approved'] === '1'; ?>
+        <div class="notice <?php echo $ok ? 'notice-success' : 'notice-error'; ?>"><p><?php echo esc_html(isset($_GET['matrix_review_message']) ? wp_unslash((string) $_GET['matrix_review_message']) : ($ok ? 'Submission approved.' : 'Could not approve submission.')); ?></p></div>
+    <?php endif; ?>
+    <?php if (isset($_GET['matrix_review_rejected'])) : ?>
+        <?php $ok = $_GET['matrix_review_rejected'] === '1'; ?>
+        <div class="notice <?php echo $ok ? 'notice-success' : 'notice-error'; ?>"><p><?php echo esc_html(isset($_GET['matrix_review_message']) ? wp_unslash((string) $_GET['matrix_review_message']) : ($ok ? 'Submission rejected.' : 'Could not reject submission.')); ?></p></div>
+    <?php endif; ?>
+    <?php if (isset($_GET['matrix_client_mode_updated'])) : ?>
+        <?php $ok = $_GET['matrix_client_mode_updated'] === '1'; ?>
+        <div class="notice <?php echo $ok ? 'notice-success' : 'notice-error'; ?>"><p><?php echo $ok ? 'Client link publish mode updated.' : 'Could not update client link publish mode.'; ?></p></div>
     <?php endif; ?>
     <?php if (!empty($import_message)) echo $import_message; ?>
 
@@ -201,6 +220,13 @@ foreach ($all_posts as $post) {
                 <span class="description">When a client saves the form, send a summary of all changed fields (before → after) to this email.</span>
             </p>
 
+            <p style="margin: 12px 0 6px 0;"><strong>Moderation notification email (optional)</strong></p>
+            <p style="margin-top: 0;">
+                <input type="email" name="matrix_review_notify_email" value="<?php echo esc_attr($review_notify_email); ?>" placeholder="name@example.com" style="min-width: 320px;" />
+                <br />
+                <span class="description">When a moderated link submission is sent for approval, notify this email. If blank, falls back to Client update notification email.</span>
+            </p>
+
             <p style="margin-top: 1rem;"><strong>2. Create client link</strong></p>
             <p style="margin: 0.35rem 0;">
                 <label style="margin-right: 1rem;">
@@ -212,6 +238,12 @@ foreach ($all_posts as $post) {
                     Reminder after
                     <input type="number" min="0" step="1" name="matrix_client_link_reminder_days" value="0" style="width:80px;" />
                     days
+                </label>
+            </p>
+            <p style="margin: 0.35rem 0;">
+                <label>
+                    <input type="checkbox" name="matrix_client_requires_approval" value="1" />
+                    Require approval before publishing (off by default)
                 </label>
             </p>
             <p class="description" style="margin-top: 0;">Use 0 to disable. Expiry blocks form access after the selected number of days.</p>
@@ -257,6 +289,7 @@ foreach ($all_posts as $post) {
                         <th>Link</th>
                         <th>Expiry / Reminder</th>
                         <th>Instructions</th>
+                        <th>Publish mode</th>
                         <th style="width: 260px;">Action</th>
                     </tr>
                 </thead>
@@ -280,6 +313,7 @@ foreach ($all_posts as $post) {
                     $reminder_due = ($reminder_days > 0 && $created_days_ago >= $reminder_days);
                     $mailto_row_url = 'mailto:?subject=' . rawurlencode('Content editing link') . '&body=' . rawurlencode("Hi,\n\nPlease use this link to review and update content:\n" . $link_url . "\n");
                     $instructions_preview = isset($entry['custom_instructions']) ? wp_strip_all_tags((string) $entry['custom_instructions']) : '';
+                    $requires_approval = !empty($entry['requires_approval']);
                 ?>
                     <tr>
                         <td><?php echo $created_at > 0 ? esc_html(wp_date('Y-m-d H:i', $created_at)) : '—'; ?></td>
@@ -296,9 +330,20 @@ foreach ($all_posts as $post) {
                             <?php endif; ?>
                         </td>
                         <td><?php echo $instructions_preview !== '' ? esc_html(function_exists('mb_substr') ? mb_substr($instructions_preview, 0, 120) : substr($instructions_preview, 0, 120)) . (strlen($instructions_preview) > 120 ? '…' : '') : '—'; ?></td>
+                        <td><?php echo $requires_approval ? '<strong>Needs approval</strong>' : 'Publish on submit'; ?></td>
                         <td>
                             <div style="display:flex; gap:6px; flex-wrap:wrap;">
                                 <a class="button button-small" href="<?php echo esc_url($mailto_row_url); ?>">Email link</a>
+                                <form method="post" style="margin:0; display:flex; gap:6px; align-items:center;">
+                                    <?php wp_nonce_field('matrix_client_links_action', 'matrix_client_links_action_nonce'); ?>
+                                    <input type="hidden" name="matrix_client_links_action" value="update_mode" />
+                                    <input type="hidden" name="matrix_client_link_token" value="<?php echo esc_attr($token); ?>" />
+                                    <select name="matrix_client_link_mode">
+                                        <option value="publish" <?php selected(!$requires_approval); ?>>Publish on submit</option>
+                                        <option value="approval" <?php selected($requires_approval); ?>>Needs approval</option>
+                                    </select>
+                                    <button type="submit" class="button button-small">Save mode</button>
+                                </form>
                                 <form method="post" style="margin:0;">
                                     <?php wp_nonce_field('matrix_client_links_action', 'matrix_client_links_action_nonce'); ?>
                                     <input type="hidden" name="matrix_client_links_action" value="generate_one" />
@@ -322,6 +367,63 @@ foreach ($all_posts as $post) {
                 <input type="hidden" name="matrix_client_links_action" value="clear_all" />
                 <button type="submit" class="button">Clear all links (+ screenshots)</button>
             </form>
+        <?php endif; ?>
+    </div>
+
+    <div class="card" style="max-width: 900px; padding: 1.5rem; margin: 1.5rem 0;">
+        <h2 style="margin-top: 0;">Pending reviews</h2>
+        <?php $pending_reviews = isset($pending_reviews) && is_array($pending_reviews) ? $pending_reviews : []; ?>
+        <?php if (empty($pending_reviews)) : ?>
+            <p class="description">No pending submissions.</p>
+        <?php else : ?>
+            <table class="widefat striped" style="margin-top: 0.75rem;">
+                <thead>
+                    <tr>
+                        <th>Submitted</th>
+                        <th>Submitted by</th>
+                        <th>Items</th>
+                        <th>Token</th>
+                        <th style="width:260px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($pending_reviews as $submission_id => $submission) :
+                    $submitted_at = isset($submission['created_at']) ? (int) $submission['created_at'] : 0;
+                    $submitted_by = isset($submission['created_by_email']) ? (string) $submission['created_by_email'] : '';
+                    $token = isset($submission['token']) ? (string) $submission['token'] : '';
+                    $post_ids = isset($submission['post_ids']) && is_array($submission['post_ids']) ? array_map('intval', $submission['post_ids']) : [];
+                    $labels = [];
+                    foreach ($post_ids as $pid) {
+                        $title = get_the_title($pid);
+                        $labels[] = (is_string($title) && $title !== '') ? $title : ('Post #' . $pid);
+                    }
+                ?>
+                    <tr>
+                        <td><?php echo $submitted_at > 0 ? esc_html(wp_date('Y-m-d H:i', $submitted_at)) : '—'; ?></td>
+                        <td><?php echo $submitted_by !== '' ? esc_html($submitted_by) : '—'; ?></td>
+                        <td><?php echo esc_html(implode(', ', array_slice($labels, 0, 3)) . (count($labels) > 3 ? ' +' . (count($labels) - 3) . ' more' : '')); ?></td>
+                        <td><code><?php echo esc_html($token); ?></code></td>
+                        <td>
+                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                <form method="post" style="margin:0;">
+                                    <?php wp_nonce_field('matrix_reviews_action', 'matrix_reviews_action_nonce'); ?>
+                                    <input type="hidden" name="matrix_reviews_action" value="approve" />
+                                    <input type="hidden" name="matrix_review_submission_id" value="<?php echo esc_attr((string) $submission_id); ?>" />
+                                    <button type="submit" class="button button-primary button-small">Approve &amp; publish</button>
+                                </form>
+                                <form method="post" style="margin:0;">
+                                    <?php wp_nonce_field('matrix_reviews_action', 'matrix_reviews_action_nonce'); ?>
+                                    <input type="hidden" name="matrix_reviews_action" value="reject" />
+                                    <input type="hidden" name="matrix_review_submission_id" value="<?php echo esc_attr((string) $submission_id); ?>" />
+                                    <input type="text" name="matrix_review_note" value="" placeholder="Reason (optional)" style="width:180px;" />
+                                    <button type="submit" class="button button-small">Reject</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
         <?php endif; ?>
     </div>
 

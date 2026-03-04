@@ -22,6 +22,8 @@ define('MATRIX_EXPORT_ADMIN_DUPLICATE_NOTIFY_EMAIL_OPTION', 'matrix_export_admin
 define('MATRIX_EXPORT_DISABLED_FORM_FIELDS_OPTION', 'matrix_export_disabled_form_fields');
 define('MATRIX_EXPORT_DISABLED_BLOCKS_OPTION', 'matrix_export_disabled_blocks');
 define('MATRIX_EXPORT_PENDING_REVIEWS_OPTION', 'matrix_export_pending_reviews');
+define('MATRIX_EXPORT_AI_SETTINGS_OPTION', 'matrix_export_ai_settings');
+define('MATRIX_EXPORT_RUNTIME_SETTINGS_OPTION', 'matrix_export_runtime_settings');
 /** Max size for image uploads in the client form (bytes). Default 2 MB. */
 define('MATRIX_EXPORT_MAX_IMAGE_UPLOAD_BYTES', 2 * 1024 * 1024);
 /** Max size for video uploads in the client form (bytes). Default 30 MB. */
@@ -42,6 +44,7 @@ add_action('wp_ajax_matrix_export_save_page_status', 'matrix_export_ajax_save_pa
 add_action('wp_ajax_matrix_export_autosave_draft', 'matrix_export_ajax_autosave_draft');
 add_action('wp_ajax_matrix_export_duplicate_page', 'matrix_export_ajax_duplicate_page');
 add_action('wp_ajax_matrix_export_get_fields_for_posts', 'matrix_export_ajax_get_fields_for_posts');
+add_action('wp_ajax_matrix_export_ai_generate_block', 'matrix_export_ajax_ai_generate_block');
 add_action('wp_enqueue_scripts', 'matrix_export_content_editing_scripts', 5);
 add_filter('manage_pages_columns', 'matrix_export_add_status_column');
 add_filter('manage_posts_columns', 'matrix_export_add_status_column');
@@ -331,6 +334,50 @@ function matrix_export_handle_actions() {
             } else {
                 delete_option(MATRIX_EXPORT_REVIEW_NOTIFY_EMAIL_OPTION);
             }
+        }
+        $runtime_node_binary = isset($_POST['matrix_runtime_node_binary']) ? trim((string) wp_unslash($_POST['matrix_runtime_node_binary'])) : '';
+        $runtime_playwright_path = isset($_POST['matrix_runtime_playwright_browsers_path']) ? trim((string) wp_unslash($_POST['matrix_runtime_playwright_browsers_path'])) : '';
+        $runtime_settings = [
+            'node_binary' => sanitize_text_field($runtime_node_binary),
+            'playwright_browsers_path' => sanitize_text_field($runtime_playwright_path),
+        ];
+        if ($runtime_settings['node_binary'] === '' && $runtime_settings['playwright_browsers_path'] === '') {
+            delete_option(MATRIX_EXPORT_RUNTIME_SETTINGS_OPTION);
+        } else {
+            update_option(MATRIX_EXPORT_RUNTIME_SETTINGS_OPTION, $runtime_settings, false);
+        }
+        $ai_provider = isset($_POST['matrix_ai_provider']) ? sanitize_key(wp_unslash($_POST['matrix_ai_provider'])) : 'openai';
+        if (!in_array($ai_provider, ['openai', 'gemini'], true)) {
+            $ai_provider = 'openai';
+        }
+        $ai_model_select = isset($_POST['matrix_ai_model_select']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_model_select'])) : '';
+        $ai_model_custom = isset($_POST['matrix_ai_model_custom']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_model_custom'])) : '';
+        $ai_model_legacy = isset($_POST['matrix_ai_model']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_model'])) : '';
+        $ai_model = $ai_model_custom !== '' ? $ai_model_custom : ($ai_model_select !== '' ? $ai_model_select : $ai_model_legacy);
+        $ai_openai_key = isset($_POST['matrix_ai_openai_key']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_openai_key'])) : '';
+        $ai_gemini_key = isset($_POST['matrix_ai_gemini_key']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_gemini_key'])) : '';
+        $existing_ai_settings = matrix_export_get_ai_settings();
+        $ai_settings = [
+            'enabled' => !empty($_POST['matrix_ai_enabled']) ? 1 : 0,
+            'provider' => $ai_provider,
+            'model' => $ai_model !== '' ? $ai_model : ($ai_provider === 'gemini' ? 'gemini-3-flash' : 'gpt-5-mini'),
+            'openai_api_key' => $ai_openai_key !== '' ? $ai_openai_key : (isset($existing_ai_settings['openai_api_key']) ? (string) $existing_ai_settings['openai_api_key'] : ''),
+            'gemini_api_key' => $ai_gemini_key !== '' ? $ai_gemini_key : (isset($existing_ai_settings['gemini_api_key']) ? (string) $existing_ai_settings['gemini_api_key'] : ''),
+        ];
+        if ($ai_openai_key === '' && !empty($_POST['matrix_ai_openai_key_clear'])) {
+            $ai_settings['openai_api_key'] = '';
+        }
+        if ($ai_gemini_key === '' && !empty($_POST['matrix_ai_gemini_key_clear'])) {
+            $ai_settings['gemini_api_key'] = '';
+        }
+        update_option(MATRIX_EXPORT_AI_SETTINGS_OPTION, $ai_settings, false);
+        if (!empty($_POST['matrix_settings_submit']) && (string) wp_unslash($_POST['matrix_settings_submit']) === '1') {
+            $back = wp_get_referer();
+            if (!is_string($back) || $back === '') {
+                $back = admin_url('tools.php?page=matrix-content-export');
+            }
+            wp_safe_redirect(add_query_arg(['matrix_settings_saved' => '1'], $back));
+            exit;
         }
         $post_ids = isset($_POST['matrix_export_post_ids']) && is_array($_POST['matrix_export_post_ids'])
             ? array_map('intval', $_POST['matrix_export_post_ids'])
@@ -643,6 +690,337 @@ function matrix_export_normalize_acf_value_for_save($value) {
         return (string) $value;
     }
     return 0;
+}
+
+/**
+ * Read AI settings from options with defaults.
+ *
+ * @return array{enabled:int,provider:string,model:string,openai_api_key:string,gemini_api_key:string}
+ */
+function matrix_export_get_ai_settings() {
+    $raw = get_option(MATRIX_EXPORT_AI_SETTINGS_OPTION, []);
+    if (!is_array($raw)) {
+        $raw = [];
+    }
+    $provider = isset($raw['provider']) ? sanitize_key((string) $raw['provider']) : 'openai';
+    if (!in_array($provider, ['openai', 'gemini'], true)) {
+        $provider = 'openai';
+    }
+    $model = isset($raw['model']) ? sanitize_text_field((string) $raw['model']) : '';
+    if ($model === '') {
+        $model = $provider === 'gemini' ? 'gemini-3-flash' : 'gpt-5-mini';
+    }
+    return [
+        'enabled' => !empty($raw['enabled']) ? 1 : 0,
+        'provider' => $provider,
+        'model' => $model,
+        'openai_api_key' => isset($raw['openai_api_key']) ? sanitize_text_field((string) $raw['openai_api_key']) : '',
+        'gemini_api_key' => isset($raw['gemini_api_key']) ? sanitize_text_field((string) $raw['gemini_api_key']) : '',
+    ];
+}
+
+/**
+ * Runtime settings for screenshot generation paths.
+ *
+ * @return array{node_binary:string,playwright_browsers_path:string}
+ */
+function matrix_export_get_runtime_settings() {
+    $raw = get_option(MATRIX_EXPORT_RUNTIME_SETTINGS_OPTION, []);
+    if (!is_array($raw)) {
+        $raw = [];
+    }
+    return [
+        'node_binary' => isset($raw['node_binary']) ? trim((string) $raw['node_binary']) : '',
+        'playwright_browsers_path' => isset($raw['playwright_browsers_path']) ? trim((string) $raw['playwright_browsers_path']) : '',
+    ];
+}
+
+/**
+ * Extract first JSON object found in text.
+ *
+ * @param string $text
+ * @return array<string,mixed>|null
+ */
+function matrix_export_ai_extract_json_object($text) {
+    $text = is_string($text) ? trim($text) : '';
+    if ($text === '') {
+        return null;
+    }
+    $decoded = json_decode($text, true);
+    if (is_array($decoded)) {
+        return $decoded;
+    }
+    if (preg_match('/\{.*\}/s', $text, $m)) {
+        $decoded = json_decode((string) $m[0], true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+    }
+    if (preg_match('/```(?:json)?\s*(\{.*\})\s*```/s', $text, $m)) {
+        $decoded = json_decode((string) $m[1], true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+    }
+    return null;
+}
+
+/**
+ * Call configured provider and return generated text.
+ *
+ * @param array{provider:string,model:string,openai_api_key:string,gemini_api_key:string} $settings
+ * @param string $prompt
+ * @return string|WP_Error
+ */
+function matrix_export_ai_call_provider(array $settings, $prompt) {
+    $provider = isset($settings['provider']) ? (string) $settings['provider'] : 'openai';
+    $model = isset($settings['model']) ? (string) $settings['model'] : '';
+    $prompt = (string) $prompt;
+    if ($provider === 'gemini') {
+        $api_key = isset($settings['gemini_api_key']) ? (string) $settings['gemini_api_key'] : '';
+        if ($api_key === '') {
+            return new WP_Error('missing_key', 'Gemini API key is missing.');
+        }
+        $model = preg_replace('#^models/#i', '', trim((string) $model));
+        if ($model === '') {
+            $model = 'gemini-3-flash';
+        }
+        $request_payload = [
+            'contents' => [[
+                'role' => 'user',
+                'parts' => [['text' => $prompt]],
+            ]],
+            'generationConfig' => [
+                'temperature' => 0.7,
+                'maxOutputTokens' => 1200,
+            ],
+        ];
+        $request_gemini = function ($model_id, $api_version) use ($api_key, $request_payload) {
+            $url = 'https://generativelanguage.googleapis.com/' . $api_version . '/models/' . rawurlencode($model_id) . ':generateContent?key=' . rawurlencode($api_key);
+            $resp = wp_remote_post($url, [
+                'timeout' => 45,
+                'headers' => ['Content-Type' => 'application/json'],
+                'body' => wp_json_encode($request_payload),
+            ]);
+            if (is_wp_error($resp)) {
+                return $resp;
+            }
+            $status = (int) wp_remote_retrieve_response_code($resp);
+            $body = json_decode((string) wp_remote_retrieve_body($resp), true);
+            if ($status >= 400) {
+                $err_msg = '';
+                if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message'])) {
+                    $err_msg = trim($body['error']['message']);
+                }
+                if ($err_msg === '') {
+                    $err_msg = 'Gemini request failed (HTTP ' . $status . ').';
+                }
+                return new WP_Error('gemini_http_error', $err_msg);
+            }
+            if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message']) && trim($body['error']['message']) !== '') {
+                return new WP_Error('gemini_api_error', trim($body['error']['message']));
+            }
+            $text = '';
+            if (isset($body['candidates'][0]['content']['parts']) && is_array($body['candidates'][0]['content']['parts'])) {
+                foreach ($body['candidates'][0]['content']['parts'] as $part) {
+                    if (isset($part['text']) && is_string($part['text'])) {
+                        $text .= $part['text'];
+                    }
+                }
+            }
+            if ($text === '' && isset($body['candidates'][0]['output']) && is_string($body['candidates'][0]['output'])) {
+                $text = $body['candidates'][0]['output'];
+            }
+            if ($text === '') {
+                return new WP_Error('empty_response', 'Gemini returned an empty response.');
+            }
+            return $text;
+        };
+
+        $versions = ['v1', 'v1beta'];
+        foreach ($versions as $version) {
+            $result = $request_gemini($model, $version);
+            if (!is_wp_error($result)) {
+                return $result;
+            }
+            $msg = strtolower($result->get_error_message());
+            if (strpos($msg, 'not found') === false && strpos($msg, 'not supported') === false) {
+                return $result;
+            }
+        }
+
+        $fallback_models = ['gemini-3-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+        foreach ($fallback_models as $fallback_model) {
+            if ($fallback_model === $model) {
+                continue;
+            }
+            foreach ($versions as $version) {
+                $result = $request_gemini($fallback_model, $version);
+                if (!is_wp_error($result)) {
+                    return $result;
+                }
+            }
+        }
+        return new WP_Error('gemini_model_unavailable', 'Selected Gemini model is unavailable. Try gemini-3-flash or gemini-3.1-flash-lite.');
+    }
+
+    $api_key = isset($settings['openai_api_key']) ? (string) $settings['openai_api_key'] : '';
+    if ($api_key === '') {
+        return new WP_Error('missing_key', 'OpenAI API key is missing.');
+    }
+    $resp = wp_remote_post('https://api.openai.com/v1/chat/completions', [
+        'timeout' => 45,
+        'headers' => [
+            'Content-Type' => 'application/json',
+            'Authorization' => 'Bearer ' . $api_key,
+        ],
+        'body' => wp_json_encode([
+            'model' => $model,
+            'temperature' => 0.7,
+            'messages' => [
+                [
+                    'role' => 'system',
+                    'content' => 'You are a website content assistant. Output only valid JSON.',
+                ],
+                [
+                    'role' => 'user',
+                    'content' => $prompt,
+                ],
+            ],
+        ]),
+    ]);
+    if (is_wp_error($resp)) {
+        return $resp;
+    }
+    $status = (int) wp_remote_retrieve_response_code($resp);
+    $body = json_decode((string) wp_remote_retrieve_body($resp), true);
+    if ($status >= 400) {
+        $err_msg = '';
+        if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message'])) {
+            $err_msg = trim($body['error']['message']);
+        }
+        if ($err_msg === '') {
+            $err_msg = 'OpenAI request failed (HTTP ' . $status . ').';
+        }
+        return new WP_Error('openai_http_error', $err_msg);
+    }
+    if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message']) && trim($body['error']['message']) !== '') {
+        return new WP_Error('openai_api_error', trim($body['error']['message']));
+    }
+    $text = isset($body['choices'][0]['message']['content']) ? (string) $body['choices'][0]['message']['content'] : '';
+    if ($text === '') {
+        return new WP_Error('empty_response', 'OpenAI returned an empty response.');
+    }
+    return $text;
+}
+
+/**
+ * AJAX: generate AI suggestions for one form block.
+ */
+function matrix_export_ajax_ai_generate_block() {
+    if (!is_user_logged_in() || !matrix_export_user_can_access_client_form()) {
+        wp_send_json_error(['message' => 'Forbidden'], 403);
+    }
+    if (!isset($_POST['matrix_ai_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['matrix_ai_nonce'])), 'matrix_export_ai_generate_block')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 400);
+    }
+    $settings = matrix_export_get_ai_settings();
+    if (empty($settings['enabled'])) {
+        wp_send_json_error(['message' => 'AI mode is disabled.'], 400);
+    }
+    $token = isset($_POST['matrix_form_token']) ? sanitize_text_field(wp_unslash($_POST['matrix_form_token'])) : '';
+    $post_id = isset($_POST['post_id']) ? (int) $_POST['post_id'] : 0;
+    $block_source = isset($_POST['block_source']) ? sanitize_text_field(wp_unslash($_POST['block_source'])) : '';
+    $block_index = isset($_POST['block_index']) ? (int) $_POST['block_index'] : -1;
+    $block_type = isset($_POST['block_type']) ? sanitize_text_field(wp_unslash($_POST['block_type'])) : '';
+    $instructions = isset($_POST['instructions']) ? sanitize_textarea_field(wp_unslash($_POST['instructions'])) : '';
+    $bullets = isset($_POST['bullets']) ? sanitize_textarea_field(wp_unslash($_POST['bullets'])) : '';
+    $fields_json = isset($_POST['fields_json']) ? wp_unslash((string) $_POST['fields_json']) : '';
+
+    $allowed_posts = Matrix_Export::get_client_link_post_ids($token);
+    if ($post_id <= 0 || empty($allowed_posts) || !in_array($post_id, array_map('intval', $allowed_posts), true)) {
+        wp_send_json_error(['message' => 'Invalid token or page context.'], 403);
+    }
+    $fields = json_decode($fields_json, true);
+    if (!is_array($fields) || empty($fields)) {
+        wp_send_json_error(['message' => 'No eligible text fields found in this block.'], 400);
+    }
+    $field_lines = [];
+    $allowed_field_keys = [];
+    foreach ($fields as $field) {
+        if (!is_array($field)) {
+            continue;
+        }
+        $key = isset($field['key']) ? sanitize_text_field((string) $field['key']) : '';
+        $label = isset($field['label']) ? sanitize_text_field((string) $field['label']) : $key;
+        $value = isset($field['value']) ? (string) $field['value'] : '';
+        if ($key === '') {
+            continue;
+        }
+        $allowed_field_keys[$key] = true;
+        $field_lines[] = '- ' . $key . ' (' . $label . '): ' . str_replace(["\r", "\n"], [' ', ' '], $value);
+    }
+    if (empty($field_lines)) {
+        wp_send_json_error(['message' => 'No valid fields were provided for generation.'], 400);
+    }
+
+    $prompt = "Generate improved website copy for one content block.\n";
+    $prompt .= "Return ONLY JSON in this exact shape: {\"fields\":{\"field_key\":\"new value\"}}\n";
+    $prompt .= "Rules:\n";
+    $prompt .= "- Only include field keys that were provided.\n";
+    $prompt .= "- Keep brand-safe, concise, and professional tone.\n";
+    $prompt .= "- Preserve intent and avoid adding unsupported claims.\n";
+    $prompt .= "- If instructions conflict with existing content, prioritize instructions.\n";
+    $prompt .= "Context:\n";
+    $prompt .= "post_id: " . $post_id . "\n";
+    $prompt .= "block_source: " . $block_source . "\n";
+    $prompt .= "block_index: " . $block_index . "\n";
+    $prompt .= "block_type: " . $block_type . "\n";
+    $prompt .= "Instructions:\n" . ($instructions !== '' ? $instructions : '(none)') . "\n";
+    $prompt .= "Bullet points:\n" . ($bullets !== '' ? $bullets : '(none)') . "\n";
+    $prompt .= "Current fields:\n" . implode("\n", $field_lines) . "\n";
+
+    $generated = matrix_export_ai_call_provider($settings, $prompt);
+    if (is_wp_error($generated)) {
+        wp_send_json_error(['message' => $generated->get_error_message()], 500);
+    }
+    $generated_text = trim((string) $generated);
+    $json = matrix_export_ai_extract_json_object((string) $generated);
+    if (!is_array($json) || !isset($json['fields']) || !is_array($json['fields'])) {
+        // Tolerate plain-text responses by mapping text to the first requested field.
+        if (!empty($allowed_field_keys) && $generated_text !== '') {
+            $single_key = (string) array_key_first($allowed_field_keys);
+            if (preg_match('/```(?:[a-zA-Z0-9_-]+)?\s*(.*?)\s*```/s', $generated_text, $m)) {
+                $generated_text = trim((string) $m[1]);
+            }
+            if ($generated_text === '') {
+                wp_send_json_error(['message' => 'AI returned empty output. Try again or switch model.'], 500);
+            }
+            wp_send_json_success([
+                'suggestions' => [$single_key => $generated_text],
+                'provider' => $settings['provider'],
+                'model' => $settings['model'],
+                'fallback' => 'plain_text',
+            ]);
+        }
+        wp_send_json_error(['message' => 'AI response was not valid JSON. Try again.'], 500);
+    }
+    $suggestions = [];
+    foreach ($json['fields'] as $key => $value) {
+        $key = sanitize_text_field((string) $key);
+        if ($key === '' || !isset($allowed_field_keys[$key])) {
+            continue;
+        }
+        $suggestions[$key] = is_string($value) ? trim($value) : trim((string) $value);
+    }
+    if (empty($suggestions)) {
+        wp_send_json_error(['message' => 'AI did not return any usable field suggestions.'], 500);
+    }
+    wp_send_json_success([
+        'suggestions' => $suggestions,
+        'provider' => $settings['provider'],
+        'model' => $settings['model'],
+    ]);
 }
 
 /**
@@ -1206,6 +1584,8 @@ function matrix_export_render_page() {
     }
     $show_client_link = isset($_GET['matrix_client_link']);
     $client_links = Matrix_Export::get_client_links();
+    $ai_settings = matrix_export_get_ai_settings();
+    $runtime_settings = matrix_export_get_runtime_settings();
     $pending_reviews = matrix_export_get_pending_reviews();
     uasort($client_links, function ($a, $b) {
         $a_created = isset($a['created_at']) ? (int) $a['created_at'] : 0;

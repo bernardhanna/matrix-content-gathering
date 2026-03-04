@@ -9,6 +9,38 @@ $all_posts  = Matrix_Export::get_posts_for_selection();
 $admin_duplicate_notify_email = get_option(MATRIX_EXPORT_ADMIN_DUPLICATE_NOTIFY_EMAIL_OPTION, '');
 $notify_email = get_option(MATRIX_EXPORT_NOTIFY_EMAIL_OPTION, '');
 $review_notify_email = get_option(MATRIX_EXPORT_REVIEW_NOTIFY_EMAIL_OPTION, '');
+$ai_settings = isset($ai_settings) && is_array($ai_settings) ? $ai_settings : (function_exists('matrix_export_get_ai_settings') ? matrix_export_get_ai_settings() : []);
+$ai_enabled = !empty($ai_settings['enabled']);
+$ai_provider = isset($ai_settings['provider']) ? (string) $ai_settings['provider'] : 'openai';
+$ai_model = isset($ai_settings['model']) ? (string) $ai_settings['model'] : ($ai_provider === 'gemini' ? 'gemini-3-flash' : 'gpt-5-mini');
+$ai_openai_models = [
+    'gpt-5',
+    'gpt-5-mini',
+    'gpt-5-nano',
+    'gpt-4.1',
+    'gpt-4.1-mini',
+    'gpt-4o',
+    'gpt-4o-mini',
+    'o4-mini',
+];
+$ai_gemini_models = [
+    'gemini-3.1-pro',
+    'gemini-3-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+];
+$all_ai_models = array_values(array_unique(array_merge($ai_openai_models, $ai_gemini_models)));
+$ai_model_select = in_array($ai_model, $all_ai_models, true) ? $ai_model : ($ai_provider === 'gemini' ? 'gemini-3-flash' : 'gpt-5-mini');
+$ai_model_custom = in_array($ai_model, $all_ai_models, true) ? '' : $ai_model;
+$ai_openai_key_set = !empty($ai_settings['openai_api_key']);
+$ai_gemini_key_set = !empty($ai_settings['gemini_api_key']);
+$runtime_settings = isset($runtime_settings) && is_array($runtime_settings) ? $runtime_settings : (function_exists('matrix_export_get_runtime_settings') ? matrix_export_get_runtime_settings() : []);
+$runtime_node_binary = isset($runtime_settings['node_binary']) ? (string) $runtime_settings['node_binary'] : '';
+$runtime_playwright_browsers_path = isset($runtime_settings['playwright_browsers_path']) ? (string) $runtime_settings['playwright_browsers_path'] : '';
 $all_form_field_keys = Matrix_Export::get_all_content_field_keys();
 $form_field_post_types_map = Matrix_Export::get_content_field_key_post_types_map();
 $disabled_form_field_keys = Matrix_Export::get_disabled_form_fields();
@@ -80,8 +112,17 @@ foreach ($all_posts as $post) {
         <?php $ok = $_GET['matrix_client_mode_updated'] === '1'; ?>
         <div class="notice <?php echo $ok ? 'notice-success' : 'notice-error'; ?>"><p><?php echo $ok ? 'Client link publish mode updated.' : 'Could not update client link publish mode.'; ?></p></div>
     <?php endif; ?>
+    <?php if (isset($_GET['matrix_settings_saved']) && $_GET['matrix_settings_saved'] === '1') : ?>
+        <div class="notice notice-success"><p>Settings saved.</p></div>
+    <?php endif; ?>
     <?php if (!empty($import_message)) echo $import_message; ?>
 
+    <div class="nav-tab-wrapper" style="margin: 1rem 0 0.5rem;">
+        <a href="#" class="nav-tab nav-tab-active matrix-admin-tab-btn" data-target="content">Content Workflow</a>
+        <a href="#" class="nav-tab matrix-admin-tab-btn" data-target="settings">Settings</a>
+    </div>
+
+    <div id="matrix-admin-tab-content" class="matrix-admin-tab-panel">
     <div class="card" style="max-width: 900px; padding: 1.5rem; margin: 1.5rem 0;">
         <h2 style="margin-top: 0;">1. Choose what to include</h2>
 
@@ -442,7 +483,129 @@ foreach ($all_posts as $post) {
     </div>
 </div>
 
+    <div id="matrix-admin-tab-settings" class="matrix-admin-tab-panel" style="display:none;">
+        <div class="card" style="max-width: 900px; padding: 1.5rem; margin: 1.5rem 0;">
+            <h2 style="margin-top: 0;">AI and Runtime Settings</h2>
+            <form method="post">
+                <?php wp_nonce_field('matrix_export', 'matrix_export_nonce'); ?>
+                <input type="hidden" name="matrix_settings_submit" value="1" />
+
+                <p style="margin: 12px 0 6px 0;"><strong>AI block assistant (optional)</strong></p>
+                <p style="margin-top: 0.25rem;">
+                    <label><input type="checkbox" name="matrix_ai_enabled" value="1" <?php checked($ai_enabled); ?> /> Enable AI generation per block in the client form</label>
+                </p>
+                <p style="margin: 0.5rem 0;">
+                    <label style="margin-right: 1rem;">Provider
+                        <select name="matrix_ai_provider" id="matrix-ai-provider-select">
+                            <option value="openai" <?php selected($ai_provider, 'openai'); ?>>OpenAI</option>
+                            <option value="gemini" <?php selected($ai_provider, 'gemini'); ?>>Gemini</option>
+                        </select>
+                    </label>
+                    <label>Model
+                        <select name="matrix_ai_model_select" id="matrix-ai-model-select">
+                            <optgroup label="OpenAI">
+                                <?php foreach ($ai_openai_models as $m) : ?>
+                                    <option value="<?php echo esc_attr($m); ?>" <?php selected($ai_model_select, $m); ?>><?php echo esc_html($m); ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                            <optgroup label="Gemini">
+                                <?php foreach ($ai_gemini_models as $m) : ?>
+                                    <option value="<?php echo esc_attr($m); ?>" <?php selected($ai_model_select, $m); ?>><?php echo esc_html($m); ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                        </select>
+                    </label>
+                </p>
+                <p style="margin: 0.35rem 0;">
+                    <label style="display:block;">Custom model (optional override)</label>
+                    <input type="text" name="matrix_ai_model_custom" value="<?php echo esc_attr($ai_model_custom); ?>" placeholder="Use only if your account has a different model ID" style="min-width: 420px;" />
+                </p>
+                <p style="margin: 0.35rem 0;">
+                    <label style="display:block;">OpenAI API key <?php echo $ai_openai_key_set ? '<em>(saved)</em>' : ''; ?></label>
+                    <input type="password" name="matrix_ai_openai_key" value="" placeholder="<?php echo $ai_openai_key_set ? 'Leave blank to keep existing key' : 'sk-...'; ?>" style="min-width: 420px;" />
+                    <?php if ($ai_openai_key_set) : ?>
+                        <label style="margin-left: 8px;"><input type="checkbox" name="matrix_ai_openai_key_clear" value="1" /> Clear saved key</label>
+                    <?php endif; ?>
+                </p>
+                <p style="margin: 0.35rem 0;">
+                    <label style="display:block;">Gemini API key <?php echo $ai_gemini_key_set ? '<em>(saved)</em>' : ''; ?></label>
+                    <input type="password" name="matrix_ai_gemini_key" value="" placeholder="<?php echo $ai_gemini_key_set ? 'Leave blank to keep existing key' : 'AIza...'; ?>" style="min-width: 420px;" />
+                    <?php if ($ai_gemini_key_set) : ?>
+                        <label style="margin-left: 8px;"><input type="checkbox" name="matrix_ai_gemini_key_clear" value="1" /> Clear saved key</label>
+                    <?php endif; ?>
+                </p>
+                <p class="description" style="margin-top:0.25rem;">API keys are stored in WordPress options. Users still review and accept/reject generated output before saving.</p>
+
+                <p style="margin: 12px 0 6px 0;"><strong>Screenshot runtime paths (optional)</strong></p>
+                <p style="margin-top: 0;">
+                    <label style="display:block;">Node binary path</label>
+                    <input type="text" name="matrix_runtime_node_binary" value="<?php echo esc_attr($runtime_node_binary); ?>" placeholder="/opt/node-20/bin/node" style="min-width: 420px;" />
+                    <span class="description" style="display:block;">Leave empty to auto-detect (or use `MATRIX_EXPORT_NODE_BINARY` in wp-config.php).</span>
+                </p>
+                <p style="margin-top: 0.35rem;">
+                    <label style="display:block;">Playwright browsers path</label>
+                    <input type="text" name="matrix_runtime_playwright_browsers_path" value="<?php echo esc_attr($runtime_playwright_browsers_path); ?>" placeholder="/root/.cache/ms-playwright" style="min-width: 420px;" />
+                    <span class="description" style="display:block;">Leave empty for default cache path (or use `MATRIX_EXPORT_PLAYWRIGHT_BROWSERS_PATH` in wp-config.php).</span>
+                </p>
+
+                <p style="margin-top: 1rem;">
+                    <button type="submit" class="button button-primary">Save settings</button>
+                </p>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
+(function() {
+    var tabButtons = document.querySelectorAll('.matrix-admin-tab-btn');
+    var contentPanel = document.getElementById('matrix-admin-tab-content');
+    var settingsPanel = document.getElementById('matrix-admin-tab-settings');
+    if (!tabButtons.length || !contentPanel || !settingsPanel) return;
+    function activate(target) {
+        var showSettings = target === 'settings';
+        contentPanel.style.display = showSettings ? 'none' : '';
+        settingsPanel.style.display = showSettings ? '' : 'none';
+        tabButtons.forEach(function(btn) {
+            var on = btn.getAttribute('data-target') === target;
+            btn.classList.toggle('nav-tab-active', on);
+        });
+        if (window.location.hash !== '#matrix-tab-' + target) {
+            if (history && history.replaceState) {
+                history.replaceState(null, '', '#matrix-tab-' + target);
+            }
+        }
+    }
+    tabButtons.forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            activate(btn.getAttribute('data-target') || 'content');
+        });
+    });
+    var initial = window.location.hash === '#matrix-tab-settings' ? 'settings' : 'content';
+    activate(initial);
+})();
+
+(function() {
+    var providerSelect = document.getElementById('matrix-ai-provider-select');
+    var modelSelect = document.getElementById('matrix-ai-model-select');
+    if (providerSelect && modelSelect) {
+        var openaiSet = new Set(['gpt-5','gpt-5-mini','gpt-5-nano','gpt-4.1','gpt-4.1-mini','gpt-4o','gpt-4o-mini','o4-mini']);
+        var geminiSet = new Set(['gemini-3.1-pro','gemini-3-flash','gemini-3.1-flash-lite','gemini-2.5-pro','gemini-2.5-flash','gemini-2.0-flash','gemini-1.5-pro','gemini-1.5-flash']);
+        function nudgeModelForProvider() {
+            var provider = providerSelect.value || 'openai';
+            var current = modelSelect.value || '';
+            if (provider === 'gemini' && !geminiSet.has(current)) {
+                modelSelect.value = 'gemini-3-flash';
+            }
+            if (provider === 'openai' && !openaiSet.has(current)) {
+                modelSelect.value = 'gpt-5-mini';
+            }
+        }
+        providerSelect.addEventListener('change', nudgeModelForProvider);
+    }
+})();
+
 (function() {
     var form = document.getElementById('matrix-export-form');
     if (!form) return;

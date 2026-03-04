@@ -20,6 +20,9 @@ $client_link_reminder_days = isset($data['client_link_reminder_days']) ? (int) $
 $client_link_created_at = isset($data['client_link_created_at']) ? (int) $data['client_link_created_at'] : 0;
 $client_custom_instructions = isset($data['client_custom_instructions']) ? (string) $data['client_custom_instructions'] : '';
 $client_requires_approval = !empty($data['client_requires_approval']);
+$matrix_ai_enabled = !empty($data['matrix_ai_enabled']);
+$matrix_ai_url = isset($data['matrix_ai_generate_ajax_url']) ? (string) $data['matrix_ai_generate_ajax_url'] : '';
+$matrix_ai_nonce = isset($data['matrix_ai_generate_nonce']) ? (string) $data['matrix_ai_generate_nonce'] : '';
 $site_name = function_exists('get_bloginfo') ? (string) get_bloginfo('name') : '';
 $block_preview_urls = $is_on_site ? Matrix_Export::ensure_block_preview_urls($rows) : [];
 $has_previewable_blocks = false;
@@ -471,7 +474,7 @@ if (!$in_theme) : ?>
             </div>
         </div>
     </div>
-    <form method="post" action="<?php echo esc_url($form_action); ?>" id="matrix-client-form" enctype="multipart/form-data" class="matrix-client-form" novalidate aria-label="Client content editing form" data-matrix-requires-approval="<?php echo $client_requires_approval ? '1' : '0'; ?>"<?php if (isset($data['matrix_save_status_ajax_url'], $data['matrix_save_status_nonce']) && $data['matrix_save_status_ajax_url'] !== '' && $data['matrix_save_status_nonce'] !== '') : ?> data-matrix-save-status-url="<?php echo esc_url($data['matrix_save_status_ajax_url']); ?>" data-matrix-save-status-nonce="<?php echo esc_attr($data['matrix_save_status_nonce']); ?>"<?php endif; ?><?php if (isset($data['matrix_autosave_draft_ajax_url'], $data['matrix_autosave_draft_nonce']) && $data['matrix_autosave_draft_ajax_url'] !== '' && $data['matrix_autosave_draft_nonce'] !== '') : ?> data-matrix-autosave-url="<?php echo esc_url($data['matrix_autosave_draft_ajax_url']); ?>" data-matrix-autosave-nonce="<?php echo esc_attr($data['matrix_autosave_draft_nonce']); ?>" data-matrix-autosave-interval-ms="75000"<?php endif; ?><?php if (isset($data['matrix_duplicate_page_ajax_url'], $data['matrix_duplicate_page_nonce']) && $data['matrix_duplicate_page_ajax_url'] !== '' && $data['matrix_duplicate_page_nonce'] !== '') : ?> data-matrix-duplicate-url="<?php echo esc_url($data['matrix_duplicate_page_ajax_url']); ?>" data-matrix-duplicate-nonce="<?php echo esc_attr($data['matrix_duplicate_page_nonce']); ?>"<?php endif; ?>>
+    <form method="post" action="<?php echo esc_url($form_action); ?>" id="matrix-client-form" enctype="multipart/form-data" class="matrix-client-form" novalidate aria-label="Client content editing form" data-matrix-requires-approval="<?php echo $client_requires_approval ? '1' : '0'; ?>" data-matrix-ai-enabled="<?php echo $matrix_ai_enabled ? '1' : '0'; ?>"<?php if ($matrix_ai_url !== '' && $matrix_ai_nonce !== '') : ?> data-matrix-ai-url="<?php echo esc_url($matrix_ai_url); ?>" data-matrix-ai-nonce="<?php echo esc_attr($matrix_ai_nonce); ?>"<?php endif; ?><?php if (isset($data['matrix_save_status_ajax_url'], $data['matrix_save_status_nonce']) && $data['matrix_save_status_ajax_url'] !== '' && $data['matrix_save_status_nonce'] !== '') : ?> data-matrix-save-status-url="<?php echo esc_url($data['matrix_save_status_ajax_url']); ?>" data-matrix-save-status-nonce="<?php echo esc_attr($data['matrix_save_status_nonce']); ?>"<?php endif; ?><?php if (isset($data['matrix_autosave_draft_ajax_url'], $data['matrix_autosave_draft_nonce']) && $data['matrix_autosave_draft_ajax_url'] !== '' && $data['matrix_autosave_draft_nonce'] !== '') : ?> data-matrix-autosave-url="<?php echo esc_url($data['matrix_autosave_draft_ajax_url']); ?>" data-matrix-autosave-nonce="<?php echo esc_attr($data['matrix_autosave_draft_nonce']); ?>" data-matrix-autosave-interval-ms="75000"<?php endif; ?><?php if (isset($data['matrix_duplicate_page_ajax_url'], $data['matrix_duplicate_page_nonce']) && $data['matrix_duplicate_page_ajax_url'] !== '' && $data['matrix_duplicate_page_nonce'] !== '') : ?> data-matrix-duplicate-url="<?php echo esc_url($data['matrix_duplicate_page_ajax_url']); ?>" data-matrix-duplicate-nonce="<?php echo esc_attr($data['matrix_duplicate_page_nonce']); ?>"<?php endif; ?>>
         <input type="hidden" name="matrix_form_token" value="<?php echo esc_attr($token); ?>" />
         <input type="hidden" name="matrix_form_submit" value="1" />
         <input type="hidden" name="matrix_active_page" value="<?php echo $draft_active_page > 0 ? $draft_active_page : (!empty($page_order) ? (int) $page_order[0] : 0); ?>" />
@@ -485,6 +488,21 @@ if (!$in_theme) : ?>
             <strong>Please fix the highlighted fields before saving.</strong>
             <ul id="matrix-form-errors-list"></ul>
         </div>
+        <?php if ($matrix_ai_enabled) : ?>
+            <div class="field" style="margin-bottom:14px;border:1px solid #dcdcde;border-radius:6px;padding:10px;background:#f9fafb;">
+                <label class="field-label" for="matrix-ai-global-tone">AI global tone</label>
+                <select id="matrix-ai-global-tone">
+                    <option value="Professional">Professional</option>
+                    <option value="Friendly">Friendly</option>
+                    <option value="Confident">Confident</option>
+                    <option value="Persuasive">Persuasive</option>
+                    <option value="Concise">Concise</option>
+                    <option value="Plain language">Plain language</option>
+                    <option value="Formal">Formal</option>
+                </select>
+                <p class="matrix-help-text">Applies to all AI field generations unless overridden by field-level instructions.</p>
+            </div>
+        <?php endif; ?>
 
         <?php if (count($page_order) > 1) : ?>
         <div class="tabs" role="tablist">
@@ -518,7 +536,7 @@ if (!$in_theme) : ?>
                     $all_row_keys = array_diff(array_keys($row), array_merge($meta_keys, ['_global_index']));
                     $row_field_keys = array_filter($all_row_keys, function ($fn) { return Matrix_Export::is_content_field($fn); });
                 ?>
-                    <div class="block">
+                    <div class="block" data-row-index="<?php echo (int) $i; ?>">
                         <input type="hidden" name="matrix_post_id[]" value="<?php echo esc_attr($post_id); ?>" />
                         <input type="hidden" name="matrix_block_source[]" value="<?php echo esc_attr($block_source); ?>" />
                         <input type="hidden" name="matrix_block_index[]" value="<?php echo esc_attr($block_index); ?>" />
@@ -733,7 +751,12 @@ if (!$in_theme) : ?>
                                 $use_editor = $is_on_site && $long && function_exists('wp_editor');
                         ?>
                             <div class="field">
-                                <label class="field-label" for="<?php echo esc_attr($field_id); ?>"><?php echo esc_html($field_label); ?></label>
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                                    <label class="field-label" for="<?php echo esc_attr($field_id); ?>"><?php echo esc_html($field_label); ?></label>
+                                    <?php if ($matrix_ai_enabled) : ?>
+                                        <button type="button" class="button button-small matrix-ai-field-open" style="background:#111;color:#fff;border-color:#111;" data-ai-panel-id="<?php echo esc_attr($field_id . '-ai-panel'); ?>">A.I mode</button>
+                                    <?php endif; ?>
+                                </div>
                                 <?php
                                 $is_required = (bool) preg_match('/(^|__|_)(headline|heading|title)($|__|_)/i', (string) $field_name);
                                 $is_summary = (bool) preg_match('/(^|__|_)(summary|excerpt|description|subheading|dek)($|__|_)/i', (string) $field_name);
@@ -756,16 +779,64 @@ if (!$in_theme) : ?>
                                 <?php endif; if ($is_required || $is_summary) : ?>
                                         <p id="<?php echo esc_attr($editor_id . '-count'); ?>" class="matrix-count-hint" aria-live="polite"></p>
                                 <?php endif;
+                                    if ($matrix_ai_enabled) : ?>
+                                        <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($editor_id); ?>" style="display:none;border:1px solid #dcdcde;border-radius:6px;padding:8px;margin-top:8px;background:#f9fafb;">
+                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Instructions (optional)</label>
+                                            <textarea class="matrix-ai-field-instructions" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="Specific direction for this field..."></textarea>
+                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Bullet points (optional)</label>
+                                            <textarea class="matrix-ai-field-bullets" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="- Key point 1&#10;- Key point 2"></textarea>
+                                            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+                                                <button type="button" class="button button-small matrix-ai-field-generate" style="background:#111;color:#fff;border-color:#111;">Generate</button>
+                                                <button type="button" class="button button-small matrix-ai-field-retry" style="display:none;background:#111;color:#fff;border-color:#111;">Try again</button>
+                                                <button type="button" class="button button-small matrix-ai-field-accept" style="display:none;background:#111;color:#fff;border-color:#111;">Accept</button>
+                                                <button type="button" class="button button-small matrix-ai-field-reject" style="display:none;background:#111;color:#fff;border-color:#111;">Reject</button>
+                                            </div>
+                                            <p class="matrix-ai-field-status description" style="margin:0;"></p>
+                                            <div class="matrix-ai-field-preview" style="display:none;margin-top:6px;padding:8px;border:1px solid #e2e8f0;background:#fff;border-radius:4px;white-space:pre-wrap;"></div>
+                                        </div>
+                                <?php endif;
                                 elseif ($long) : ?>
                                     <textarea id="<?php echo esc_attr($field_id); ?>" name="matrix_field[<?php echo (int) $i; ?>][<?php echo esc_attr($field_name); ?>]" rows="6" class="matrix-textarea-html"<?php echo $is_required ? ' data-matrix-required="1"' : ''; ?><?php echo $count_attr; ?> data-matrix-label="<?php echo esc_attr($field_label); ?>"><?php echo esc_textarea($val); ?></textarea>
                                     <?php if ($field_help !== '') : ?><p class="matrix-help-text"><?php echo esc_html($field_help); ?></p><?php endif; ?>
                                     <?php if ($is_required || $is_summary) : ?><p id="<?php echo esc_attr($field_id . '-count'); ?>" class="matrix-count-hint" aria-live="polite"></p><?php endif; ?>
                                     <p id="<?php echo esc_attr($field_id . '-error'); ?>" class="matrix-field-error" aria-live="polite"></p>
+                                    <?php if ($matrix_ai_enabled) : ?>
+                                        <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($field_id); ?>" style="display:none;border:1px solid #dcdcde;border-radius:6px;padding:8px;margin-top:8px;background:#f9fafb;">
+                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Instructions (optional)</label>
+                                            <textarea class="matrix-ai-field-instructions" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="Specific direction for this field..."></textarea>
+                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Bullet points (optional)</label>
+                                            <textarea class="matrix-ai-field-bullets" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="- Key point 1&#10;- Key point 2"></textarea>
+                                            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+                                                <button type="button" class="button button-small matrix-ai-field-generate" style="background:#111;color:#fff;border-color:#111;">Generate</button>
+                                                <button type="button" class="button button-small matrix-ai-field-retry" style="display:none;background:#111;color:#fff;border-color:#111;">Try again</button>
+                                                <button type="button" class="button button-small matrix-ai-field-accept" style="display:none;background:#111;color:#fff;border-color:#111;">Accept</button>
+                                                <button type="button" class="button button-small matrix-ai-field-reject" style="display:none;background:#111;color:#fff;border-color:#111;">Reject</button>
+                                            </div>
+                                            <p class="matrix-ai-field-status description" style="margin:0;"></p>
+                                            <div class="matrix-ai-field-preview" style="display:none;margin-top:6px;padding:8px;border:1px solid #e2e8f0;background:#fff;border-radius:4px;white-space:pre-wrap;"></div>
+                                        </div>
+                                    <?php endif; ?>
                                 <?php else : ?>
                                     <input id="<?php echo esc_attr($field_id); ?>" type="text" name="matrix_field[<?php echo (int) $i; ?>][<?php echo esc_attr($field_name); ?>]" value="<?php echo esc_attr($val); ?>"<?php echo $is_required ? ' data-matrix-required="1"' : ''; ?><?php echo $count_attr; ?> data-matrix-label="<?php echo esc_attr($field_label); ?>" />
                                     <?php if ($field_help !== '') : ?><p class="matrix-help-text"><?php echo esc_html($field_help); ?></p><?php endif; ?>
                                     <?php if ($is_required || $is_summary) : ?><p id="<?php echo esc_attr($field_id . '-count'); ?>" class="matrix-count-hint" aria-live="polite"></p><?php endif; ?>
                                     <p id="<?php echo esc_attr($field_id . '-error'); ?>" class="matrix-field-error" aria-live="polite"></p>
+                                    <?php if ($matrix_ai_enabled) : ?>
+                                        <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($field_id); ?>" style="display:none;border:1px solid #dcdcde;border-radius:6px;padding:8px;margin-top:8px;background:#f9fafb;">
+                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Instructions (optional)</label>
+                                            <textarea class="matrix-ai-field-instructions" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="Specific direction for this field..."></textarea>
+                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Bullet points (optional)</label>
+                                            <textarea class="matrix-ai-field-bullets" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="- Key point 1&#10;- Key point 2"></textarea>
+                                            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+                                                <button type="button" class="button button-small matrix-ai-field-generate" style="background:#111;color:#fff;border-color:#111;">Generate</button>
+                                                <button type="button" class="button button-small matrix-ai-field-retry" style="display:none;background:#111;color:#fff;border-color:#111;">Try again</button>
+                                                <button type="button" class="button button-small matrix-ai-field-accept" style="display:none;background:#111;color:#fff;border-color:#111;">Accept</button>
+                                                <button type="button" class="button button-small matrix-ai-field-reject" style="display:none;background:#111;color:#fff;border-color:#111;">Reject</button>
+                                            </div>
+                                            <p class="matrix-ai-field-status description" style="margin:0;"></p>
+                                            <div class="matrix-ai-field-preview" style="display:none;margin-top:6px;padding:8px;border:1px solid #e2e8f0;background:#fff;border-radius:4px;white-space:pre-wrap;"></div>
+                                        </div>
+                                    <?php endif; ?>
                                 <?php endif; ?>
                             </div>
                         <?php endif; endforeach; ?>
@@ -812,6 +883,9 @@ if (!$in_theme) : ?>
         var autosaveUrl = form ? form.getAttribute('data-matrix-autosave-url') : '';
         var autosaveNonce = form ? form.getAttribute('data-matrix-autosave-nonce') : '';
         var requiresApproval = form ? String(form.getAttribute('data-matrix-requires-approval') || '0') === '1' : false;
+        var aiEnabled = form ? String(form.getAttribute('data-matrix-ai-enabled') || '0') === '1' : false;
+        var aiUrl = form ? String(form.getAttribute('data-matrix-ai-url') || '') : '';
+        var aiNonce = form ? String(form.getAttribute('data-matrix-ai-nonce') || '') : '';
         var duplicateUrl = form ? form.getAttribute('data-matrix-duplicate-url') : '';
         var duplicateNonce = form ? form.getAttribute('data-matrix-duplicate-nonce') : '';
         var autosaveIntervalMs = form ? parseInt(form.getAttribute('data-matrix-autosave-interval-ms'), 10) : 75000;
@@ -976,6 +1050,199 @@ if (!$in_theme) : ?>
             submitProgressEl.firstChild.textContent = requiresApproval
                 ? 'Submitting for approval... Please keep this tab open. '
                 : 'Saving live updates... Please keep this tab open. ';
+        }
+        function getFieldKeyFromName(name, rowIndex) {
+            var re = new RegExp('^matrix_field\\[' + rowIndex + '\\]\\[([^\\]]+)\\]');
+            var m = String(name || '').match(re);
+            return m && m[1] ? m[1] : '';
+        }
+        function getTinyEditorForField(field) {
+            if (!field || !field.id || !window.tinyMCE || typeof window.tinyMCE.get !== 'function') return null;
+            return window.tinyMCE.get(field.id);
+        }
+        function setFieldValue(field, value) {
+            var editor = getTinyEditorForField(field);
+            if (editor && typeof editor.setContent === 'function') {
+                editor.setContent(String(value || ''));
+                if (typeof editor.save === 'function') editor.save();
+            } else {
+                field.value = String(value || '');
+            }
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            field.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        function getFieldCurrentValue(field) {
+            if (!field) return '';
+            var editor = getTinyEditorForField(field);
+            if (editor && typeof editor.getContent === 'function') {
+                return String(editor.getContent() || '');
+            }
+            return String(field.value || '');
+        }
+        function renderAiPreview(previewEl, text) {
+            if (!previewEl) return;
+            if (!text) {
+                previewEl.style.display = 'none';
+                previewEl.innerHTML = '';
+                return;
+            }
+            previewEl.textContent = String(text);
+            previewEl.style.display = '';
+        }
+        function initAiFieldAssist() {
+            if (!aiEnabled || !aiUrl || !aiNonce || !form) return;
+            var toneSelect = document.getElementById('matrix-ai-global-tone');
+            wrap.querySelectorAll('.matrix-ai-field-open').forEach(function(openBtn) {
+                var panelId = openBtn.getAttribute('data-ai-panel-id') || '';
+                var panel = panelId ? document.getElementById(panelId) : null;
+                if (!panel) return;
+                var generateBtn = panel.querySelector('.matrix-ai-field-generate');
+                var retryBtn = panel.querySelector('.matrix-ai-field-retry');
+                var acceptBtn = panel.querySelector('.matrix-ai-field-accept');
+                var rejectBtn = panel.querySelector('.matrix-ai-field-reject');
+                var instructionsEl = panel.querySelector('.matrix-ai-field-instructions');
+                var bulletsEl = panel.querySelector('.matrix-ai-field-bullets');
+                var statusEl = panel.querySelector('.matrix-ai-field-status');
+                var previewEl = panel.querySelector('.matrix-ai-field-preview');
+                if (!generateBtn || !statusEl || !previewEl || !instructionsEl || !bulletsEl) return;
+                var suggestion = '';
+                var inFlight = false;
+                var hasPendingAiDraft = false;
+                var originalValueBeforeAi = '';
+                openBtn.addEventListener('click', function() {
+                    panel.style.display = panel.style.display === 'none' || panel.style.display === '' ? '' : 'none';
+                });
+                var setActionsVisible = function(show) {
+                    if (retryBtn) retryBtn.style.display = show ? '' : 'none';
+                    if (acceptBtn) acceptBtn.style.display = show ? '' : 'none';
+                    if (rejectBtn) rejectBtn.style.display = show ? '' : 'none';
+                };
+                var runGenerate = function() {
+                    if (inFlight) return;
+                    var token = tokenInput ? String(tokenInput.value || '') : '';
+                    if (!token) {
+                        statusEl.textContent = 'Missing form token.';
+                        return;
+                    }
+                    var block = panel.closest('.block');
+                    if (!block) {
+                        statusEl.textContent = 'Could not locate block context.';
+                        return;
+                    }
+                    var rowIndex = parseInt(panel.getAttribute('data-row-index') || '-1', 10);
+                    if (!Number.isFinite(rowIndex) || rowIndex < 0) {
+                        statusEl.textContent = 'Invalid row context.';
+                        return;
+                    }
+                    var postIdEl = block.querySelector('input[name="matrix_post_id[]"]');
+                    var sourceEl = block.querySelector('input[name="matrix_block_source[]"]');
+                    var blockIndexEl = block.querySelector('input[name="matrix_block_index[]"]');
+                    var blockTypeEl = block.querySelector('input[name="matrix_block_type[]"]');
+                    var targetId = panel.getAttribute('data-field-target-id') || '';
+                    var field = targetId ? document.getElementById(targetId) : null;
+                    if (!field) {
+                        statusEl.textContent = 'Could not find target field.';
+                        return;
+                    }
+                    var fieldKey = panel.getAttribute('data-field-key') || getFieldKeyFromName(field.name || '', rowIndex);
+                    var fieldLabel = panel.getAttribute('data-field-label') || fieldKey;
+                    if (!fieldKey) {
+                        statusEl.textContent = 'Could not determine field key.';
+                        return;
+                    }
+                    var fieldValue = getFieldCurrentValue(field);
+                    var tone = toneSelect ? String(toneSelect.value || '').trim() : '';
+                    var instructionText = String(instructionsEl.value || '').trim();
+                    var mergedInstructions = tone ? ('Global tone: ' + tone + (instructionText ? '\n' + instructionText : '')) : instructionText;
+                    inFlight = true;
+                    generateBtn.disabled = true;
+                    if (retryBtn) retryBtn.disabled = true;
+                    statusEl.textContent = 'Generating...';
+                    var body = new FormData();
+                    body.set('action', 'matrix_export_ai_generate_block');
+                    body.set('matrix_ai_nonce', aiNonce);
+                    body.set('matrix_form_token', token);
+                    body.set('post_id', postIdEl ? String(postIdEl.value || '0') : '0');
+                    body.set('block_source', sourceEl ? String(sourceEl.value || '') : '');
+                    body.set('block_index', blockIndexEl ? String(blockIndexEl.value || '-1') : '-1');
+                    body.set('block_type', blockTypeEl ? String(blockTypeEl.value || '') : '');
+                    body.set('row_index', String(rowIndex));
+                    body.set('instructions', mergedInstructions);
+                    body.set('bullets', String(bulletsEl.value || ''));
+                    body.set('fields_json', JSON.stringify([{ key: fieldKey, label: fieldLabel, value: fieldValue }]));
+                    fetch(aiUrl, { method: 'POST', body: body, credentials: 'same-origin' })
+                        .then(function(r) { return r.json(); })
+                        .then(function(json) {
+                            if (!json || !json.success || !json.data || !json.data.suggestions) {
+                                var msg = json && json.data && json.data.message ? String(json.data.message) : 'AI request failed.';
+                                statusEl.textContent = msg;
+                                setActionsVisible(false);
+                                renderAiPreview(previewEl, '');
+                                suggestion = '';
+                                return;
+                            }
+                            var suggestions = json.data.suggestions || {};
+                            suggestion = suggestions[fieldKey] ? String(suggestions[fieldKey]) : '';
+                            if (!suggestion) {
+                                var keys = Object.keys(suggestions);
+                                suggestion = keys.length ? String(suggestions[keys[0]] || '') : '';
+                            }
+                            if (!suggestion) {
+                                statusEl.textContent = 'AI did not return a suggestion for this field.';
+                                setActionsVisible(false);
+                                renderAiPreview(previewEl, '');
+                                return;
+                            }
+                            if (!hasPendingAiDraft) {
+                                originalValueBeforeAi = getFieldCurrentValue(field);
+                            }
+                            setFieldValue(field, suggestion);
+                            hasPendingAiDraft = true;
+                            renderAiPreview(previewEl, suggestion);
+                            statusEl.textContent = 'Draft generated and applied. Use Accept to keep or Reject to restore previous text.';
+                            setActionsVisible(true);
+                        })
+                        .catch(function() {
+                            statusEl.textContent = 'AI request failed. Please try again.';
+                            setActionsVisible(false);
+                            renderAiPreview(previewEl, '');
+                            suggestion = '';
+                        })
+                        .finally(function() {
+                            inFlight = false;
+                            generateBtn.disabled = false;
+                            if (retryBtn) retryBtn.disabled = false;
+                        });
+                };
+                generateBtn.addEventListener('click', runGenerate);
+                if (retryBtn) retryBtn.addEventListener('click', runGenerate);
+                if (acceptBtn) {
+                    acceptBtn.addEventListener('click', function() {
+                        if (!hasPendingAiDraft) {
+                            statusEl.textContent = 'No pending AI draft to accept.';
+                            return;
+                        }
+                        hasPendingAiDraft = false;
+                        originalValueBeforeAi = '';
+                        statusEl.textContent = 'AI draft accepted.';
+                    });
+                }
+                if (rejectBtn) {
+                    rejectBtn.addEventListener('click', function() {
+                        var targetId = panel.getAttribute('data-field-target-id') || '';
+                        var field = targetId ? document.getElementById(targetId) : null;
+                        if (field && hasPendingAiDraft) {
+                            setFieldValue(field, originalValueBeforeAi);
+                        }
+                        suggestion = '';
+                        hasPendingAiDraft = false;
+                        originalValueBeforeAi = '';
+                        renderAiPreview(previewEl, '');
+                        setActionsVisible(false);
+                        statusEl.textContent = 'Draft discarded and previous value restored.';
+                    });
+                }
+            });
         }
         function setDraftStatus(text) {
             if (draftSaveStatusEl && text) draftSaveStatusEl.textContent = text;
@@ -1344,6 +1611,7 @@ if (!$in_theme) : ?>
         if (autosaveUrl && autosaveNonce && form) {
             setInterval(autosaveDraft, autosaveIntervalMs > 0 ? autosaveIntervalMs : 75000);
         }
+        initAiFieldAssist();
 
         window.addEventListener('beforeunload', function(e) {
             if (isSubmitting || !isDirty()) return;

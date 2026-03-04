@@ -566,7 +566,7 @@ class Matrix_Export {
     /**
      * Return all saved client links keyed by token.
      *
-     * @return array<string, array{post_ids: array<int,int>, created_at: int, created_by: int, expires_at: int, reminder_days: int, custom_instructions: string}>
+     * @return array<string, array{post_ids: array<int,int>, created_at: int, created_by: int, expires_at: int, reminder_days: int, custom_instructions: string, requires_approval: bool}>
      */
     public static function get_client_links() {
         $links = get_option(self::CLIENT_LINKS_OPTION, []);
@@ -594,6 +594,7 @@ class Matrix_Export {
                 'expires_at'  => isset($entry['expires_at']) ? max(0, (int) $entry['expires_at']) : 0,
                 'reminder_days' => isset($entry['reminder_days']) ? max(0, (int) $entry['reminder_days']) : 0,
                 'custom_instructions' => isset($entry['custom_instructions']) ? wp_kses_post((string) $entry['custom_instructions']) : '',
+                'requires_approval' => !empty($entry['requires_approval']),
             ];
         }
         return $clean;
@@ -603,7 +604,7 @@ class Matrix_Export {
      * Generate and save a unique client link token for selected posts.
      *
      * @param array<int, int|string> $post_ids
-     * @param array{expires_days?: int, reminder_days?: int, custom_instructions?: string} $options
+     * @param array{expires_days?: int, reminder_days?: int, custom_instructions?: string, requires_approval?: bool|int|string} $options
      * @return string Token
      */
     public static function create_client_link(array $post_ids, array $options = []) {
@@ -614,6 +615,7 @@ class Matrix_Export {
         $expires_days = isset($options['expires_days']) ? max(0, (int) $options['expires_days']) : 0;
         $reminder_days = isset($options['reminder_days']) ? max(0, (int) $options['reminder_days']) : 0;
         $custom_instructions = isset($options['custom_instructions']) ? wp_kses_post((string) $options['custom_instructions']) : '';
+        $requires_approval = !empty($options['requires_approval']);
         $expires_at = $expires_days > 0 ? (time() + ($expires_days * DAY_IN_SECONDS)) : 0;
         $links = self::get_client_links();
         $token = bin2hex(random_bytes(24));
@@ -624,6 +626,7 @@ class Matrix_Export {
             'expires_at'  => $expires_at,
             'reminder_days' => $reminder_days,
             'custom_instructions' => $custom_instructions,
+            'requires_approval' => $requires_approval,
         ];
         update_option(self::CLIENT_LINKS_OPTION, $links, false);
         return $token;

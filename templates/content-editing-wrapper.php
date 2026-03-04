@@ -41,6 +41,7 @@ $data['client_link_expires_at'] = isset($link_entry['expires_at']) ? (int) $link
 $data['client_link_reminder_days'] = isset($link_entry['reminder_days']) ? (int) $link_entry['reminder_days'] : 0;
 $data['client_link_created_at'] = isset($link_entry['created_at']) ? (int) $link_entry['created_at'] : 0;
 $data['client_custom_instructions'] = isset($link_entry['custom_instructions']) ? (string) $link_entry['custom_instructions'] : '';
+$data['client_requires_approval'] = !empty($link_entry['requires_approval']);
 $is_on_site = true;
 $in_theme = true;
 ?><!DOCTYPE html>

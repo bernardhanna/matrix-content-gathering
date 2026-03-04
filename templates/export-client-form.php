@@ -198,6 +198,38 @@ if (!$in_theme) : ?>
         .matrix-review-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
         .matrix-review-actions button { border: 2px solid #c8ced3; background: #fff; color: #323e48; padding: 8px 14px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
         .matrix-review-actions button.primary { background: linear-gradient(94deg,#ff9461 17.37%,#ff7533 90.35%); border-color: var(--matrix-orange); color: #21282f; }
+        .matrix-ai-global-wrap { margin-bottom: 14px; border: 1px solid #dcdcde; border-radius: 8px; padding: 12px; background: #f9fafb; }
+        .matrix-field-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .matrix-ai-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; border: 2px solid #111; border-radius: 4px; background: #111; color: #fff; font-weight: 600; line-height: 1.2; transition: background-color 120ms ease, border-color 120ms ease, transform 90ms ease, box-shadow 120ms ease; cursor: pointer; }
+        .matrix-ai-btn:hover { background: #2b2b2b; border-color: #2b2b2b; }
+        .matrix-ai-btn:active { transform: translateY(1px); background: #000; border-color: #000; }
+        .matrix-ai-btn:focus-visible { outline: 3px solid rgba(255,117,51,0.28); outline-offset: 1px; }
+        .matrix-ai-btn[hidden] { display: none !important; }
+        .matrix-ai-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+        .matrix-ai-btn-secondary { background: #fff; border-color: #c8ced3; color: #323e48; }
+        .matrix-ai-btn-secondary:hover { background: #f5f7f8; border-color: #a8b0b8; }
+        .matrix-ai-btn-secondary:active { background: #eceff1; border-color: #8f99a3; }
+        .matrix-ai-btn-retry { background: #facc15; border-color: #eab308; color: #1f2937; }
+        .matrix-ai-btn-retry:hover { background: #eab308; border-color: #ca8a04; }
+        .matrix-ai-btn-retry:active { background: #ca8a04; border-color: #a16207; color: #111827; }
+        .matrix-ai-btn-accept { background: #22c55e; border-color: #16a34a; color: #052e16; }
+        .matrix-ai-btn-accept:hover { background: #16a34a; border-color: #15803d; color: #ecfdf5; }
+        .matrix-ai-btn-accept:active { background: #15803d; border-color: #166534; color: #ecfdf5; }
+        .matrix-ai-btn-reject { background: #ef4444; border-color: #dc2626; color: #ffffff; }
+        .matrix-ai-btn-reject:hover { background: #dc2626; border-color: #b91c1c; }
+        .matrix-ai-btn-reject:active { background: #b91c1c; border-color: #991b1b; }
+        .matrix-ai-field-open[aria-expanded="true"] { background: #2b2b2b; border-color: #2b2b2b; }
+        .matrix-ai-field-panel { display: none; border: 1px solid #dcdcde; border-radius: 8px; padding: 10px; margin-top: 8px; background: #f9fafb; }
+        .matrix-ai-field-panel.is-open { display: block; }
+        .matrix-ai-field-panel > label { display: block; font-weight: 600; margin-bottom: 4px; color: var(--matrix-slate-700); }
+        .matrix-ai-field-instructions, .matrix-ai-field-bullets { width: 100%; min-height: 52px; margin-bottom: 8px; }
+        .matrix-ai-field-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+        .matrix-ai-feedback-wrap { margin-bottom: 8px; }
+        .matrix-ai-field-feedback { width: 100%; min-height: 52px; margin-bottom: 0; }
+        .matrix-ai-field-status { margin: 0; min-height: 1.2em; }
+        .matrix-ai-field-panel[aria-busy="true"] .matrix-ai-field-status { color: var(--matrix-slate-700); }
+        .matrix-ai-field-preview { margin-top: 6px; padding: 8px; border: 1px solid #e2e8f0; background: #fff; border-radius: 4px; white-space: pre-wrap; }
+        .matrix-ai-field-preview[hidden] { display: none !important; }
         @media (max-width: 768px) {
             h1 { font-size: 1.7rem; }
             .matrix-auth-actions { align-items: center; }
@@ -341,6 +373,38 @@ if (!$in_theme) : ?>
 .matrix-content-edit-wrap .matrix-review-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .matrix-content-edit-wrap .matrix-review-actions button { border: 2px solid #c8ced3; background: #fff; color: #323e48; padding: 8px 14px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
 .matrix-content-edit-wrap .matrix-review-actions button.primary { background: linear-gradient(94deg,#ff9461 17.37%,#ff7533 90.35%); border-color: var(--matrix-orange); color: #21282f; }
+.matrix-content-edit-wrap .matrix-ai-global-wrap { margin-bottom: 14px; border: 1px solid #dcdcde; border-radius: 8px; padding: 12px; background: #f9fafb; }
+.matrix-content-edit-wrap .matrix-field-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.matrix-content-edit-wrap .matrix-ai-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; border: 2px solid #111; border-radius: 4px; background: #111; color: #fff; font-weight: 600; line-height: 1.2; transition: background-color 120ms ease, border-color 120ms ease, transform 90ms ease, box-shadow 120ms ease; cursor: pointer; }
+.matrix-content-edit-wrap .matrix-ai-btn:hover { background: #2b2b2b; border-color: #2b2b2b; }
+.matrix-content-edit-wrap .matrix-ai-btn:active { transform: translateY(1px); background: #000; border-color: #000; }
+.matrix-content-edit-wrap .matrix-ai-btn:focus-visible { outline: 3px solid rgba(255,117,51,0.28); outline-offset: 1px; }
+.matrix-content-edit-wrap .matrix-ai-btn[hidden] { display: none !important; }
+.matrix-content-edit-wrap .matrix-ai-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+.matrix-content-edit-wrap .matrix-ai-btn-secondary { background: #fff; border-color: #c8ced3; color: #323e48; }
+.matrix-content-edit-wrap .matrix-ai-btn-secondary:hover { background: #f5f7f8; border-color: #a8b0b8; }
+.matrix-content-edit-wrap .matrix-ai-btn-secondary:active { background: #eceff1; border-color: #8f99a3; }
+.matrix-content-edit-wrap .matrix-ai-btn-retry { background: #facc15; border-color: #eab308; color: #1f2937; }
+.matrix-content-edit-wrap .matrix-ai-btn-retry:hover { background: #eab308; border-color: #ca8a04; }
+.matrix-content-edit-wrap .matrix-ai-btn-retry:active { background: #ca8a04; border-color: #a16207; color: #111827; }
+.matrix-content-edit-wrap .matrix-ai-btn-accept { background: #22c55e; border-color: #16a34a; color: #052e16; }
+.matrix-content-edit-wrap .matrix-ai-btn-accept:hover { background: #16a34a; border-color: #15803d; color: #ecfdf5; }
+.matrix-content-edit-wrap .matrix-ai-btn-accept:active { background: #15803d; border-color: #166534; color: #ecfdf5; }
+.matrix-content-edit-wrap .matrix-ai-btn-reject { background: #ef4444; border-color: #dc2626; color: #ffffff; }
+.matrix-content-edit-wrap .matrix-ai-btn-reject:hover { background: #dc2626; border-color: #b91c1c; }
+.matrix-content-edit-wrap .matrix-ai-btn-reject:active { background: #b91c1c; border-color: #991b1b; }
+.matrix-content-edit-wrap .matrix-ai-field-open[aria-expanded="true"] { background: #2b2b2b; border-color: #2b2b2b; }
+.matrix-content-edit-wrap .matrix-ai-field-panel { display: none; border: 1px solid #dcdcde; border-radius: 8px; padding: 10px; margin-top: 8px; background: #f9fafb; }
+.matrix-content-edit-wrap .matrix-ai-field-panel.is-open { display: block; }
+.matrix-content-edit-wrap .matrix-ai-field-panel > label { display: block; font-weight: 600; margin-bottom: 4px; color: var(--matrix-slate-700); }
+.matrix-content-edit-wrap .matrix-ai-field-instructions, .matrix-content-edit-wrap .matrix-ai-field-bullets { width: 100%; min-height: 52px; margin-bottom: 8px; }
+.matrix-content-edit-wrap .matrix-ai-field-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.matrix-content-edit-wrap .matrix-ai-feedback-wrap { margin-bottom: 8px; }
+.matrix-content-edit-wrap .matrix-ai-field-feedback { width: 100%; min-height: 52px; margin-bottom: 0; }
+.matrix-content-edit-wrap .matrix-ai-field-status { margin: 0; min-height: 1.2em; }
+.matrix-content-edit-wrap .matrix-ai-field-panel[aria-busy="true"] .matrix-ai-field-status { color: var(--matrix-slate-700); }
+.matrix-content-edit-wrap .matrix-ai-field-preview { margin-top: 6px; padding: 8px; border: 1px solid #e2e8f0; background: #fff; border-radius: 4px; white-space: pre-wrap; }
+.matrix-content-edit-wrap .matrix-ai-field-preview[hidden] { display: none !important; }
 @media (max-width: 768px) {
     .matrix-content-edit-wrap h1 { font-size: 1.7rem; }
     .matrix-content-edit-wrap .matrix-auth-actions { align-items: center; }
@@ -489,7 +553,7 @@ if (!$in_theme) : ?>
             <ul id="matrix-form-errors-list"></ul>
         </div>
         <?php if ($matrix_ai_enabled) : ?>
-            <div class="field" style="margin-bottom:14px;border:1px solid #dcdcde;border-radius:6px;padding:10px;background:#f9fafb;">
+            <div class="field matrix-ai-global-wrap">
                 <label class="field-label" for="matrix-ai-global-tone">AI global tone</label>
                 <select id="matrix-ai-global-tone">
                     <option value="Professional">Professional</option>
@@ -751,10 +815,10 @@ if (!$in_theme) : ?>
                                 $use_editor = $is_on_site && $long && function_exists('wp_editor');
                         ?>
                             <div class="field">
-                                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                                <div class="matrix-field-head">
                                     <label class="field-label" for="<?php echo esc_attr($field_id); ?>"><?php echo esc_html($field_label); ?></label>
                                     <?php if ($matrix_ai_enabled) : ?>
-                                        <button type="button" class="button button-small matrix-ai-field-open" style="background:#111;color:#fff;border-color:#111;" data-ai-panel-id="<?php echo esc_attr($field_id . '-ai-panel'); ?>">A.I mode</button>
+                                        <button type="button" class="button button-small matrix-ai-field-open matrix-ai-btn matrix-ai-btn-primary" data-ai-panel-id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" aria-controls="<?php echo esc_attr($field_id . '-ai-panel'); ?>" aria-expanded="false">A.I mode</button>
                                     <?php endif; ?>
                                 </div>
                                 <?php
@@ -780,19 +844,23 @@ if (!$in_theme) : ?>
                                         <p id="<?php echo esc_attr($editor_id . '-count'); ?>" class="matrix-count-hint" aria-live="polite"></p>
                                 <?php endif;
                                     if ($matrix_ai_enabled) : ?>
-                                        <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($editor_id); ?>" style="display:none;border:1px solid #dcdcde;border-radius:6px;padding:8px;margin-top:8px;background:#f9fafb;">
-                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Instructions (optional)</label>
-                                            <textarea class="matrix-ai-field-instructions" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="Specific direction for this field..."></textarea>
-                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Bullet points (optional)</label>
-                                            <textarea class="matrix-ai-field-bullets" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="- Key point 1&#10;- Key point 2"></textarea>
-                                            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-                                                <button type="button" class="button button-small matrix-ai-field-generate" style="background:#111;color:#fff;border-color:#111;">Generate</button>
-                                                <button type="button" class="button button-small matrix-ai-field-retry" style="display:none;background:#111;color:#fff;border-color:#111;">Try again</button>
-                                                <button type="button" class="button button-small matrix-ai-field-accept" style="display:none;background:#111;color:#fff;border-color:#111;">Accept</button>
-                                                <button type="button" class="button button-small matrix-ai-field-reject" style="display:none;background:#111;color:#fff;border-color:#111;">Reject</button>
+                                        <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($editor_id); ?>" role="group" aria-label="<?php echo esc_attr($field_label . ' AI tools'); ?>">
+                                            <label>Instructions (optional)</label>
+                                            <textarea class="matrix-ai-field-instructions" rows="2" placeholder="Specific direction for this field..."></textarea>
+                                            <label>Bullet points (optional)</label>
+                                            <textarea class="matrix-ai-field-bullets" rows="2" placeholder="- Key point 1&#10;- Key point 2"></textarea>
+                                            <div class="matrix-ai-field-actions">
+                                                <button type="button" class="button button-small matrix-ai-field-generate matrix-ai-btn matrix-ai-btn-primary">Generate</button>
+                                                <button type="button" class="button button-small matrix-ai-field-retry matrix-ai-btn matrix-ai-btn-retry" hidden>Try again</button>
+                                                <button type="button" class="button button-small matrix-ai-field-accept matrix-ai-btn matrix-ai-btn-accept" hidden>Accept</button>
+                                                <button type="button" class="button button-small matrix-ai-field-reject matrix-ai-btn matrix-ai-btn-reject" hidden>Reject</button>
                                             </div>
-                                            <p class="matrix-ai-field-status description" style="margin:0;"></p>
-                                            <div class="matrix-ai-field-preview" style="display:none;margin-top:6px;padding:8px;border:1px solid #e2e8f0;background:#fff;border-radius:4px;white-space:pre-wrap;"></div>
+                                            <div class="matrix-ai-feedback-wrap" hidden>
+                                                <label>Rejection reason for next try (optional)</label>
+                                                <textarea class="matrix-ai-field-feedback" rows="2" placeholder="e.g. Not enough text. Keep all sections and modernize tone."></textarea>
+                                            </div>
+                                            <p class="matrix-ai-field-status description" role="status" aria-live="polite"></p>
+                                            <div class="matrix-ai-field-preview" hidden></div>
                                         </div>
                                 <?php endif;
                                 elseif ($long) : ?>
@@ -801,19 +869,23 @@ if (!$in_theme) : ?>
                                     <?php if ($is_required || $is_summary) : ?><p id="<?php echo esc_attr($field_id . '-count'); ?>" class="matrix-count-hint" aria-live="polite"></p><?php endif; ?>
                                     <p id="<?php echo esc_attr($field_id . '-error'); ?>" class="matrix-field-error" aria-live="polite"></p>
                                     <?php if ($matrix_ai_enabled) : ?>
-                                        <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($field_id); ?>" style="display:none;border:1px solid #dcdcde;border-radius:6px;padding:8px;margin-top:8px;background:#f9fafb;">
-                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Instructions (optional)</label>
-                                            <textarea class="matrix-ai-field-instructions" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="Specific direction for this field..."></textarea>
-                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Bullet points (optional)</label>
-                                            <textarea class="matrix-ai-field-bullets" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="- Key point 1&#10;- Key point 2"></textarea>
-                                            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-                                                <button type="button" class="button button-small matrix-ai-field-generate" style="background:#111;color:#fff;border-color:#111;">Generate</button>
-                                                <button type="button" class="button button-small matrix-ai-field-retry" style="display:none;background:#111;color:#fff;border-color:#111;">Try again</button>
-                                                <button type="button" class="button button-small matrix-ai-field-accept" style="display:none;background:#111;color:#fff;border-color:#111;">Accept</button>
-                                                <button type="button" class="button button-small matrix-ai-field-reject" style="display:none;background:#111;color:#fff;border-color:#111;">Reject</button>
+                                        <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($field_id); ?>" role="group" aria-label="<?php echo esc_attr($field_label . ' AI tools'); ?>">
+                                            <label>Instructions (optional)</label>
+                                            <textarea class="matrix-ai-field-instructions" rows="2" placeholder="Specific direction for this field..."></textarea>
+                                            <label>Bullet points (optional)</label>
+                                            <textarea class="matrix-ai-field-bullets" rows="2" placeholder="- Key point 1&#10;- Key point 2"></textarea>
+                                            <div class="matrix-ai-field-actions">
+                                                <button type="button" class="button button-small matrix-ai-field-generate matrix-ai-btn matrix-ai-btn-primary">Generate</button>
+                                                <button type="button" class="button button-small matrix-ai-field-retry matrix-ai-btn matrix-ai-btn-retry" hidden>Try again</button>
+                                                <button type="button" class="button button-small matrix-ai-field-accept matrix-ai-btn matrix-ai-btn-accept" hidden>Accept</button>
+                                                <button type="button" class="button button-small matrix-ai-field-reject matrix-ai-btn matrix-ai-btn-reject" hidden>Reject</button>
                                             </div>
-                                            <p class="matrix-ai-field-status description" style="margin:0;"></p>
-                                            <div class="matrix-ai-field-preview" style="display:none;margin-top:6px;padding:8px;border:1px solid #e2e8f0;background:#fff;border-radius:4px;white-space:pre-wrap;"></div>
+                                            <div class="matrix-ai-feedback-wrap" hidden>
+                                                <label>Rejection reason for next try (optional)</label>
+                                                <textarea class="matrix-ai-field-feedback" rows="2" placeholder="e.g. Not enough text. Keep all sections and modernize tone."></textarea>
+                                            </div>
+                                            <p class="matrix-ai-field-status description" role="status" aria-live="polite"></p>
+                                            <div class="matrix-ai-field-preview" hidden></div>
                                         </div>
                                     <?php endif; ?>
                                 <?php else : ?>
@@ -822,19 +894,23 @@ if (!$in_theme) : ?>
                                     <?php if ($is_required || $is_summary) : ?><p id="<?php echo esc_attr($field_id . '-count'); ?>" class="matrix-count-hint" aria-live="polite"></p><?php endif; ?>
                                     <p id="<?php echo esc_attr($field_id . '-error'); ?>" class="matrix-field-error" aria-live="polite"></p>
                                     <?php if ($matrix_ai_enabled) : ?>
-                                        <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($field_id); ?>" style="display:none;border:1px solid #dcdcde;border-radius:6px;padding:8px;margin-top:8px;background:#f9fafb;">
-                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Instructions (optional)</label>
-                                            <textarea class="matrix-ai-field-instructions" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="Specific direction for this field..."></textarea>
-                                            <label style="display:block;font-weight:600;margin-bottom:4px;">Bullet points (optional)</label>
-                                            <textarea class="matrix-ai-field-bullets" rows="2" style="width:100%;min-height:52px;margin-bottom:6px;" placeholder="- Key point 1&#10;- Key point 2"></textarea>
-                                            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-                                                <button type="button" class="button button-small matrix-ai-field-generate" style="background:#111;color:#fff;border-color:#111;">Generate</button>
-                                                <button type="button" class="button button-small matrix-ai-field-retry" style="display:none;background:#111;color:#fff;border-color:#111;">Try again</button>
-                                                <button type="button" class="button button-small matrix-ai-field-accept" style="display:none;background:#111;color:#fff;border-color:#111;">Accept</button>
-                                                <button type="button" class="button button-small matrix-ai-field-reject" style="display:none;background:#111;color:#fff;border-color:#111;">Reject</button>
+                                        <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($field_id); ?>" role="group" aria-label="<?php echo esc_attr($field_label . ' AI tools'); ?>">
+                                            <label>Instructions (optional)</label>
+                                            <textarea class="matrix-ai-field-instructions" rows="2" placeholder="Specific direction for this field..."></textarea>
+                                            <label>Bullet points (optional)</label>
+                                            <textarea class="matrix-ai-field-bullets" rows="2" placeholder="- Key point 1&#10;- Key point 2"></textarea>
+                                            <div class="matrix-ai-field-actions">
+                                                <button type="button" class="button button-small matrix-ai-field-generate matrix-ai-btn matrix-ai-btn-primary">Generate</button>
+                                                <button type="button" class="button button-small matrix-ai-field-retry matrix-ai-btn matrix-ai-btn-retry" hidden>Try again</button>
+                                                <button type="button" class="button button-small matrix-ai-field-accept matrix-ai-btn matrix-ai-btn-accept" hidden>Accept</button>
+                                                <button type="button" class="button button-small matrix-ai-field-reject matrix-ai-btn matrix-ai-btn-reject" hidden>Reject</button>
                                             </div>
-                                            <p class="matrix-ai-field-status description" style="margin:0;"></p>
-                                            <div class="matrix-ai-field-preview" style="display:none;margin-top:6px;padding:8px;border:1px solid #e2e8f0;background:#fff;border-radius:4px;white-space:pre-wrap;"></div>
+                                            <div class="matrix-ai-feedback-wrap" hidden>
+                                                <label>Rejection reason for next try (optional)</label>
+                                                <textarea class="matrix-ai-field-feedback" rows="2" placeholder="e.g. Not enough text. Keep all sections and modernize tone."></textarea>
+                                            </div>
+                                            <p class="matrix-ai-field-status description" role="status" aria-live="polite"></p>
+                                            <div class="matrix-ai-field-preview" hidden></div>
                                         </div>
                                     <?php endif; ?>
                                 <?php endif; ?>
@@ -922,9 +998,13 @@ if (!$in_theme) : ?>
         }
 
         function syncEditors() {
+            var editorGlobal = null;
             if (window.tinyMCE && typeof window.tinyMCE.triggerSave === 'function') {
-                window.tinyMCE.triggerSave();
+                editorGlobal = window.tinyMCE;
+            } else if (window.tinymce && typeof window.tinymce.triggerSave === 'function') {
+                editorGlobal = window.tinymce;
             }
+            if (editorGlobal) editorGlobal.triggerSave();
         }
         function formSnapshot() {
             if (!form) return '';
@@ -1057,8 +1137,14 @@ if (!$in_theme) : ?>
             return m && m[1] ? m[1] : '';
         }
         function getTinyEditorForField(field) {
-            if (!field || !field.id || !window.tinyMCE || typeof window.tinyMCE.get !== 'function') return null;
-            return window.tinyMCE.get(field.id);
+            if (!field || !field.id) return null;
+            if (window.tinyMCE && typeof window.tinyMCE.get === 'function') {
+                return window.tinyMCE.get(field.id);
+            }
+            if (window.tinymce && typeof window.tinymce.get === 'function') {
+                return window.tinymce.get(field.id);
+            }
+            return null;
         }
         function setFieldValue(field, value) {
             var editor = getTinyEditorForField(field);
@@ -1082,12 +1168,66 @@ if (!$in_theme) : ?>
         function renderAiPreview(previewEl, text) {
             if (!previewEl) return;
             if (!text) {
-                previewEl.style.display = 'none';
+                previewEl.hidden = true;
                 previewEl.innerHTML = '';
                 return;
             }
             previewEl.textContent = String(text);
-            previewEl.style.display = '';
+            previewEl.hidden = false;
+        }
+        function normalizeAiSuggestionText(raw, fieldKey) {
+            var text = String(raw || '').trim();
+            if (!text) return '';
+            var stripFence = function(s) {
+                var v = String(s || '').trim();
+                var full = v.match(/```(?:[a-zA-Z0-9_-]+)?\s*([\s\S]*?)\s*```/);
+                if (full && full[1]) return String(full[1]).trim();
+                if (v.indexOf('```') === 0) {
+                    v = v.replace(/^```(?:[a-zA-Z0-9_-]+)?\s*/i, '');
+                    v = v.replace(/```$/i, '');
+                }
+                return v.trim();
+            };
+            var fromJsonObject = function(s) {
+                try {
+                    var obj = JSON.parse(String(s || ''));
+                    if (obj && obj.fields && typeof obj.fields === 'object') {
+                        if (fieldKey && Object.prototype.hasOwnProperty.call(obj.fields, fieldKey)) {
+                            return String(obj.fields[fieldKey] || '').trim();
+                        }
+                        var keys = Object.keys(obj.fields);
+                        if (keys.length) return String(obj.fields[keys[0]] || '').trim();
+                    }
+                } catch (e) {}
+                return '';
+            };
+            var fromJsonish = function(s) {
+                if (!fieldKey) return '';
+                var escKey = String(fieldKey).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                var re = new RegExp('"' + escKey + '"\\s*:\\s*"([\\\\s\\\\S]*?)"(?:\\s*[,}])?', 'm');
+                var m = String(s || '').match(re);
+                if (!m || !m[1]) return '';
+                var rawValue = String(m[1]);
+                try {
+                    var decoded = JSON.parse('"' + rawValue + '"');
+                    return typeof decoded === 'string' ? decoded.trim() : String(decoded || '').trim();
+                } catch (e) {
+                    return rawValue.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t').trim();
+                }
+            };
+            var isLikelyJsonBlob = function(s) {
+                var v = String(s || '').trim();
+                return v.indexOf('{"fields"') === 0 || v.indexOf('{') === 0 || v.indexOf('"fields"') !== -1 || v.indexOf('```json') === 0;
+            };
+
+            var unfenced = stripFence(text);
+            var extracted = fromJsonObject(unfenced);
+            if (extracted) return extracted;
+            extracted = fromJsonish(unfenced);
+            if (extracted) return extracted;
+            if (isLikelyJsonBlob(unfenced)) return '';
+            if (/^\s*```/.test(text)) return '';
+            return unfenced;
         }
         function initAiFieldAssist() {
             if (!aiEnabled || !aiUrl || !aiNonce || !form) return;
@@ -1102,6 +1242,8 @@ if (!$in_theme) : ?>
                 var rejectBtn = panel.querySelector('.matrix-ai-field-reject');
                 var instructionsEl = panel.querySelector('.matrix-ai-field-instructions');
                 var bulletsEl = panel.querySelector('.matrix-ai-field-bullets');
+                var feedbackWrapEl = panel.querySelector('.matrix-ai-feedback-wrap');
+                var feedbackEl = panel.querySelector('.matrix-ai-field-feedback');
                 var statusEl = panel.querySelector('.matrix-ai-field-status');
                 var previewEl = panel.querySelector('.matrix-ai-field-preview');
                 if (!generateBtn || !statusEl || !previewEl || !instructionsEl || !bulletsEl) return;
@@ -1109,13 +1251,39 @@ if (!$in_theme) : ?>
                 var inFlight = false;
                 var hasPendingAiDraft = false;
                 var originalValueBeforeAi = '';
+                panel.classList.remove('is-open');
+                panel.setAttribute('aria-busy', 'false');
+                var setPanelOpen = function(open) {
+                    panel.classList.toggle('is-open', !!open);
+                    openBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                };
                 openBtn.addEventListener('click', function() {
-                    panel.style.display = panel.style.display === 'none' || panel.style.display === '' ? '' : 'none';
+                    setPanelOpen(!panel.classList.contains('is-open'));
+                });
+                panel.addEventListener('keydown', function(evt) {
+                    if (evt.key !== 'Escape') return;
+                    setPanelOpen(false);
+                    openBtn.focus();
                 });
                 var setActionsVisible = function(show) {
-                    if (retryBtn) retryBtn.style.display = show ? '' : 'none';
-                    if (acceptBtn) acceptBtn.style.display = show ? '' : 'none';
-                    if (rejectBtn) rejectBtn.style.display = show ? '' : 'none';
+                    if (retryBtn) retryBtn.hidden = !show;
+                    if (acceptBtn) acceptBtn.hidden = !show;
+                    if (rejectBtn) rejectBtn.hidden = !show;
+                };
+                var setFeedbackVisible = function(show) {
+                    if (!feedbackWrapEl) return;
+                    feedbackWrapEl.hidden = !show;
+                };
+                var focusEditedField = function(field) {
+                    if (!field) return;
+                    var editor = getTinyEditorForField(field);
+                    if (editor && typeof editor.focus === 'function') {
+                        editor.focus();
+                        return;
+                    }
+                    if (typeof field.focus === 'function') {
+                        field.focus();
+                    }
                 };
                 var runGenerate = function() {
                     if (inFlight) return;
@@ -1153,8 +1321,14 @@ if (!$in_theme) : ?>
                     var fieldValue = getFieldCurrentValue(field);
                     var tone = toneSelect ? String(toneSelect.value || '').trim() : '';
                     var instructionText = String(instructionsEl.value || '').trim();
-                    var mergedInstructions = tone ? ('Global tone: ' + tone + (instructionText ? '\n' + instructionText : '')) : instructionText;
+                    var feedbackText = feedbackEl ? String(feedbackEl.value || '').trim() : '';
+                    var instructionParts = [];
+                    if (tone) instructionParts.push('Global tone: ' + tone);
+                    if (instructionText) instructionParts.push(instructionText);
+                    if (feedbackText) instructionParts.push('Revision feedback from rejected draft:\n' + feedbackText);
+                    var mergedInstructions = instructionParts.join('\n\n');
                     inFlight = true;
+                    panel.setAttribute('aria-busy', 'true');
                     generateBtn.disabled = true;
                     if (retryBtn) retryBtn.disabled = true;
                     statusEl.textContent = 'Generating...';
@@ -1187,8 +1361,9 @@ if (!$in_theme) : ?>
                                 var keys = Object.keys(suggestions);
                                 suggestion = keys.length ? String(suggestions[keys[0]] || '') : '';
                             }
+                            suggestion = normalizeAiSuggestionText(suggestion, fieldKey);
                             if (!suggestion) {
-                                statusEl.textContent = 'AI did not return a suggestion for this field.';
+                                statusEl.textContent = 'AI returned structured output that could not be parsed cleanly. Please try again.';
                                 setActionsVisible(false);
                                 renderAiPreview(previewEl, '');
                                 return;
@@ -1198,8 +1373,10 @@ if (!$in_theme) : ?>
                             }
                             setFieldValue(field, suggestion);
                             hasPendingAiDraft = true;
-                            renderAiPreview(previewEl, suggestion);
-                            statusEl.textContent = 'Draft generated and applied. Use Accept to keep or Reject to restore previous text.';
+                            renderAiPreview(previewEl, '');
+                            focusEditedField(field);
+                            setFeedbackVisible(false);
+                            statusEl.textContent = 'Draft applied directly to the field. Accept to keep it, or Reject to restore previous text.';
                             setActionsVisible(true);
                         })
                         .catch(function() {
@@ -1210,6 +1387,7 @@ if (!$in_theme) : ?>
                         })
                         .finally(function() {
                             inFlight = false;
+                            panel.setAttribute('aria-busy', 'false');
                             generateBtn.disabled = false;
                             if (retryBtn) retryBtn.disabled = false;
                         });
@@ -1224,6 +1402,8 @@ if (!$in_theme) : ?>
                         }
                         hasPendingAiDraft = false;
                         originalValueBeforeAi = '';
+                        if (feedbackEl) feedbackEl.value = '';
+                        setFeedbackVisible(false);
                         statusEl.textContent = 'AI draft accepted.';
                     });
                 }
@@ -1238,8 +1418,14 @@ if (!$in_theme) : ?>
                         hasPendingAiDraft = false;
                         originalValueBeforeAi = '';
                         renderAiPreview(previewEl, '');
-                        setActionsVisible(false);
-                        statusEl.textContent = 'Draft discarded and previous value restored.';
+                        if (retryBtn) retryBtn.hidden = false;
+                        if (acceptBtn) acceptBtn.hidden = true;
+                        if (rejectBtn) rejectBtn.hidden = true;
+                        setFeedbackVisible(true);
+                        statusEl.textContent = 'Draft rejected and previous value restored. Add a rejection reason below, then click Try again.';
+                        if (feedbackEl && typeof feedbackEl.focus === 'function') {
+                            feedbackEl.focus();
+                        }
                     });
                 }
             });

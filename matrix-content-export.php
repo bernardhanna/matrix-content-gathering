@@ -766,6 +766,124 @@ function matrix_export_ai_extract_json_object($text) {
 }
 
 /**
+ * Best-effort extraction of one field value from JSON-like text when full JSON is invalid.
+ *
+ * @param string $text
+ * @param string $field_key
+ * @return string
+ */
+function matrix_export_ai_extract_field_from_jsonish_text($text, $field_key) {
+    $text = is_string($text) ? $text : '';
+    $field_key = is_string($field_key) ? $field_key : '';
+    if ($text === '' || $field_key === '') {
+        return '';
+    }
+    $quoted_key = preg_quote($field_key, '/');
+    $raw = '';
+    if (preg_match('/"' . $quoted_key . '"\s*:\s*"((?:\\\\.|[^"\\\\])*)"/s', $text, $m)) {
+        $raw = (string) $m[1];
+    } elseif (preg_match('/"' . $quoted_key . '"\s*:\s*"((?:\\\\.|[^"\\\\])*)$/s', $text, $m)) {
+        // Tolerate truncated model output where the closing quote was cut off.
+        $raw = (string) $m[1];
+    } else {
+        return '';
+    }
+    $decoded = json_decode('"' . $raw . '"');
+    if (is_string($decoded)) {
+        return trim($decoded);
+    }
+    return trim(stripcslashes($raw));
+}
+
+/**
+ * Best-effort extraction of the first quoted JSON-ish value.
+ *
+ * @param string $text
+ * @return string
+ */
+function matrix_export_ai_extract_first_jsonish_value($text) {
+    $text = is_string($text) ? $text : '';
+    if ($text === '') {
+        return '';
+    }
+    if (preg_match('/"[A-Za-z0-9_\-]+"\s*:\s*"((?:\\\\.|[^"\\\\])*)"/s', $text, $m) ||
+        preg_match('/"[A-Za-z0-9_\-]+"\s*:\s*"((?:\\\\.|[^"\\\\])*)$/s', $text, $m)) {
+        $raw = isset($m[1]) ? (string) $m[1] : '';
+        if ($raw === '') {
+            return '';
+        }
+        $decoded = json_decode('"' . $raw . '"');
+        if (is_string($decoded)) {
+            return trim($decoded);
+        }
+        return trim(stripcslashes($raw));
+    }
+    return '';
+}
+
+/**
+ * Call OpenAI Chat Completions.
+ *
+ * @param array{provider:string,model:string,openai_api_key:string,gemini_api_key:string} $settings
+ * @param string $prompt
+ * @return string|WP_Error
+ */
+function matrix_export_ai_call_openai(array $settings, $prompt) {
+    $api_key = isset($settings['openai_api_key']) ? (string) $settings['openai_api_key'] : '';
+    if ($api_key === '') {
+        return new WP_Error('missing_key', 'OpenAI API key is missing.');
+    }
+    $model = isset($settings['model']) ? (string) $settings['model'] : '';
+    if ($model === '' || stripos($model, 'gemini') !== false) {
+        $model = 'gpt-5-mini';
+    }
+    $resp = wp_remote_post('https://api.openai.com/v1/chat/completions', [
+        'timeout' => 45,
+        'headers' => [
+            'Content-Type' => 'application/json',
+            'Authorization' => 'Bearer ' . $api_key,
+        ],
+        'body' => wp_json_encode([
+            'model' => $model,
+            'temperature' => 0.7,
+            'messages' => [
+                [
+                    'role' => 'system',
+                    'content' => 'You are a website content assistant. Output only valid JSON.',
+                ],
+                [
+                    'role' => 'user',
+                    'content' => (string) $prompt,
+                ],
+            ],
+        ]),
+    ]);
+    if (is_wp_error($resp)) {
+        return $resp;
+    }
+    $status = (int) wp_remote_retrieve_response_code($resp);
+    $body = json_decode((string) wp_remote_retrieve_body($resp), true);
+    if ($status >= 400) {
+        $err_msg = '';
+        if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message'])) {
+            $err_msg = trim($body['error']['message']);
+        }
+        if ($err_msg === '') {
+            $err_msg = 'OpenAI request failed (HTTP ' . $status . ').';
+        }
+        return new WP_Error('openai_http_error', $err_msg);
+    }
+    if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message']) && trim($body['error']['message']) !== '') {
+        return new WP_Error('openai_api_error', trim($body['error']['message']));
+    }
+    $text = isset($body['choices'][0]['message']['content']) ? (string) $body['choices'][0]['message']['content'] : '';
+    if ($text === '') {
+        return new WP_Error('empty_response', 'OpenAI returned an empty response.');
+    }
+    return $text;
+}
+
+/**
  * Call configured provider and return generated text.
  *
  * @param array{provider:string,model:string,openai_api_key:string,gemini_api_key:string} $settings
@@ -776,6 +894,18 @@ function matrix_export_ai_call_provider(array $settings, $prompt) {
     $provider = isset($settings['provider']) ? (string) $settings['provider'] : 'openai';
     $model = isset($settings['model']) ? (string) $settings['model'] : '';
     $prompt = (string) $prompt;
+    $is_connection_error = static function ($error_or_message) {
+        $msg = is_wp_error($error_or_message) ? (string) $error_or_message->get_error_message() : (string) $error_or_message;
+        $msg = strtolower($msg);
+        return (
+            strpos($msg, 'curl error 7') !== false ||
+            strpos($msg, "couldn't connect to server") !== false ||
+            strpos($msg, 'failed to connect') !== false ||
+            strpos($msg, 'timed out') !== false ||
+            strpos($msg, 'network is unreachable') !== false ||
+            strpos($msg, 'could not resolve host') !== false
+        );
+    };
     if ($provider === 'gemini') {
         $api_key = isset($settings['gemini_api_key']) ? (string) $settings['gemini_api_key'] : '';
         if ($api_key === '') {
@@ -791,17 +921,34 @@ function matrix_export_ai_call_provider(array $settings, $prompt) {
                 'parts' => [['text' => $prompt]],
             ]],
             'generationConfig' => [
-                'temperature' => 0.7,
-                'maxOutputTokens' => 1200,
+                'temperature' => 0.35,
+                'maxOutputTokens' => 2400,
             ],
         ];
         $request_gemini = function ($model_id, $api_version) use ($api_key, $request_payload) {
             $url = 'https://generativelanguage.googleapis.com/' . $api_version . '/models/' . rawurlencode($model_id) . ':generateContent?key=' . rawurlencode($api_key);
-            $resp = wp_remote_post($url, [
-                'timeout' => 45,
-                'headers' => ['Content-Type' => 'application/json'],
-                'body' => wp_json_encode($request_payload),
-            ]);
+            $resp = null;
+            for ($attempt = 0; $attempt < 2; $attempt++) {
+                $resp = wp_remote_post($url, [
+                    'timeout' => 45,
+                    'headers' => ['Content-Type' => 'application/json'],
+                    'body' => wp_json_encode($request_payload),
+                ]);
+                if (!is_wp_error($resp)) {
+                    break;
+                }
+                $msg = strtolower((string) $resp->get_error_message());
+                $retryable = (
+                    strpos($msg, 'curl error 7') !== false ||
+                    strpos($msg, "couldn't connect to server") !== false ||
+                    strpos($msg, 'failed to connect') !== false ||
+                    strpos($msg, 'timed out') !== false
+                );
+                if (!$retryable || $attempt === 1) {
+                    break;
+                }
+                usleep(200000);
+            }
             if (is_wp_error($resp)) {
                 return $resp;
             }
@@ -838,13 +985,23 @@ function matrix_export_ai_call_provider(array $settings, $prompt) {
         };
 
         $versions = ['v1', 'v1beta'];
+        $last_error = null;
         foreach ($versions as $version) {
             $result = $request_gemini($model, $version);
             if (!is_wp_error($result)) {
                 return $result;
             }
+            $last_error = $result;
             $msg = strtolower($result->get_error_message());
             if (strpos($msg, 'not found') === false && strpos($msg, 'not supported') === false) {
+                if ($is_connection_error($result) && !empty($settings['openai_api_key'])) {
+                    $openai_settings = $settings;
+                    $openai_settings['provider'] = 'openai';
+                    if (empty($openai_settings['model']) || stripos((string) $openai_settings['model'], 'gemini') !== false) {
+                        $openai_settings['model'] = 'gpt-5-mini';
+                    }
+                    return matrix_export_ai_call_openai($openai_settings, $prompt);
+                }
                 return $result;
             }
         }
@@ -859,59 +1016,18 @@ function matrix_export_ai_call_provider(array $settings, $prompt) {
                 if (!is_wp_error($result)) {
                     return $result;
                 }
+                $last_error = $result;
             }
+        }
+        if (is_wp_error($last_error) && $is_connection_error($last_error) && !empty($settings['openai_api_key'])) {
+            $openai_settings = $settings;
+            $openai_settings['provider'] = 'openai';
+            $openai_settings['model'] = 'gpt-5-mini';
+            return matrix_export_ai_call_openai($openai_settings, $prompt);
         }
         return new WP_Error('gemini_model_unavailable', 'Selected Gemini model is unavailable. Try gemini-3-flash or gemini-3.1-flash-lite.');
     }
-
-    $api_key = isset($settings['openai_api_key']) ? (string) $settings['openai_api_key'] : '';
-    if ($api_key === '') {
-        return new WP_Error('missing_key', 'OpenAI API key is missing.');
-    }
-    $resp = wp_remote_post('https://api.openai.com/v1/chat/completions', [
-        'timeout' => 45,
-        'headers' => [
-            'Content-Type' => 'application/json',
-            'Authorization' => 'Bearer ' . $api_key,
-        ],
-        'body' => wp_json_encode([
-            'model' => $model,
-            'temperature' => 0.7,
-            'messages' => [
-                [
-                    'role' => 'system',
-                    'content' => 'You are a website content assistant. Output only valid JSON.',
-                ],
-                [
-                    'role' => 'user',
-                    'content' => $prompt,
-                ],
-            ],
-        ]),
-    ]);
-    if (is_wp_error($resp)) {
-        return $resp;
-    }
-    $status = (int) wp_remote_retrieve_response_code($resp);
-    $body = json_decode((string) wp_remote_retrieve_body($resp), true);
-    if ($status >= 400) {
-        $err_msg = '';
-        if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message'])) {
-            $err_msg = trim($body['error']['message']);
-        }
-        if ($err_msg === '') {
-            $err_msg = 'OpenAI request failed (HTTP ' . $status . ').';
-        }
-        return new WP_Error('openai_http_error', $err_msg);
-    }
-    if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message']) && trim($body['error']['message']) !== '') {
-        return new WP_Error('openai_api_error', trim($body['error']['message']));
-    }
-    $text = isset($body['choices'][0]['message']['content']) ? (string) $body['choices'][0]['message']['content'] : '';
-    if ($text === '') {
-        return new WP_Error('empty_response', 'OpenAI returned an empty response.');
-    }
-    return $text;
+    return matrix_export_ai_call_openai($settings, $prompt);
 }
 
 /**
@@ -958,7 +1074,7 @@ function matrix_export_ajax_ai_generate_block() {
             continue;
         }
         $allowed_field_keys[$key] = true;
-        $field_lines[] = '- ' . $key . ' (' . $label . '): ' . str_replace(["\r", "\n"], [' ', ' '], $value);
+        $field_lines[] = 'Field: ' . $key . ' (' . $label . ")\n<<<BEGIN_FIELD>>>\n" . $value . "\n<<<END_FIELD>>>";
     }
     if (empty($field_lines)) {
         wp_send_json_error(['message' => 'No valid fields were provided for generation.'], 400);
@@ -968,7 +1084,11 @@ function matrix_export_ajax_ai_generate_block() {
     $prompt .= "Return ONLY JSON in this exact shape: {\"fields\":{\"field_key\":\"new value\"}}\n";
     $prompt .= "Rules:\n";
     $prompt .= "- Only include field keys that were provided.\n";
-    $prompt .= "- Keep brand-safe, concise, and professional tone.\n";
+    $prompt .= "- Keep brand-safe and professional tone.\n";
+    $prompt .= "- Do NOT summarize unless explicitly instructed.\n";
+    $prompt .= "- Keep roughly the same depth and amount of content as the current field.\n";
+    $prompt .= "- Preserve meaningful structure (headings, paragraphs, bullets/lists).\n";
+    $prompt .= "- If the current value is HTML, return HTML (not Markdown).\n";
     $prompt .= "- Preserve intent and avoid adding unsupported claims.\n";
     $prompt .= "- If instructions conflict with existing content, prioritize instructions.\n";
     $prompt .= "Context:\n";
@@ -987,6 +1107,36 @@ function matrix_export_ajax_ai_generate_block() {
     $generated_text = trim((string) $generated);
     $json = matrix_export_ai_extract_json_object((string) $generated);
     if (!is_array($json) || !isset($json['fields']) || !is_array($json['fields'])) {
+        $looks_like_json_payload = (
+            strpos($generated_text, '{') !== false ||
+            strpos($generated_text, '"fields"') !== false ||
+            strpos($generated_text, '"post_content"') !== false
+        );
+        if ($looks_like_json_payload && !empty($allowed_field_keys)) {
+            foreach (array_keys($allowed_field_keys) as $k) {
+                $candidate = matrix_export_ai_extract_field_from_jsonish_text($generated_text, (string) $k);
+                if ($candidate !== '') {
+                    wp_send_json_success([
+                        'suggestions' => [(string) $k => $candidate],
+                        'provider' => $settings['provider'],
+                        'model' => $settings['model'],
+                        'fallback' => 'jsonish_field_extract',
+                    ]);
+                }
+            }
+            // If key extraction fails, still salvage first value for single-field requests.
+            $first_candidate = matrix_export_ai_extract_first_jsonish_value($generated_text);
+            if ($first_candidate !== '') {
+                $single_key = (string) array_key_first($allowed_field_keys);
+                wp_send_json_success([
+                    'suggestions' => [$single_key => $first_candidate],
+                    'provider' => $settings['provider'],
+                    'model' => $settings['model'],
+                    'fallback' => 'jsonish_first_value',
+                ]);
+            }
+            wp_send_json_error(['message' => 'AI returned incomplete JSON. Try again, or add shorter instructions.'], 500);
+        }
         // Tolerate plain-text responses by mapping text to the first requested field.
         if (!empty($allowed_field_keys) && $generated_text !== '') {
             $single_key = (string) array_key_first($allowed_field_keys);

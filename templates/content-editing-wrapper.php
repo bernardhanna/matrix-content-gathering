@@ -5,6 +5,14 @@
  */
 if (!defined('ABSPATH')) exit;
 
+// Ensure editor/media assets are available in this custom frontend template.
+if (function_exists('wp_enqueue_editor')) {
+    wp_enqueue_editor();
+}
+if (function_exists('wp_enqueue_media')) {
+    wp_enqueue_media();
+}
+
 $token = isset($_GET['matrix_token']) ? sanitize_text_field(wp_unslash($_GET['matrix_token'])) : '';
 $post_ids = Matrix_Export::get_client_link_post_ids($token);
 $link_entry = Matrix_Export::get_client_link_entry($token, true);

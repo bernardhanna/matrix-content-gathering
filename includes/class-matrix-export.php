@@ -718,6 +718,27 @@ class Matrix_Export {
     }
 
     /**
+     * Update moderation mode for an existing client link.
+     *
+     * @param string $token
+     * @param bool $requires_approval
+     * @return bool
+     */
+    public static function update_client_link_requires_approval($token, $requires_approval) {
+        $token = is_string($token) ? strtolower(trim($token)) : '';
+        if ($token === '') {
+            return false;
+        }
+        $links = self::get_client_links();
+        if (!isset($links[$token]) || !is_array($links[$token])) {
+            return false;
+        }
+        $links[$token]['requires_approval'] = (bool) $requires_approval;
+        update_option(self::CLIENT_LINKS_OPTION, $links, false);
+        return true;
+    }
+
+    /**
      * Remove all generated client links.
      *
      * @return void

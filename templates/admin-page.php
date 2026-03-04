@@ -76,6 +76,10 @@ foreach ($all_posts as $post) {
         <?php $ok = $_GET['matrix_review_rejected'] === '1'; ?>
         <div class="notice <?php echo $ok ? 'notice-success' : 'notice-error'; ?>"><p><?php echo esc_html(isset($_GET['matrix_review_message']) ? wp_unslash((string) $_GET['matrix_review_message']) : ($ok ? 'Submission rejected.' : 'Could not reject submission.')); ?></p></div>
     <?php endif; ?>
+    <?php if (isset($_GET['matrix_client_mode_updated'])) : ?>
+        <?php $ok = $_GET['matrix_client_mode_updated'] === '1'; ?>
+        <div class="notice <?php echo $ok ? 'notice-success' : 'notice-error'; ?>"><p><?php echo $ok ? 'Client link publish mode updated.' : 'Could not update client link publish mode.'; ?></p></div>
+    <?php endif; ?>
     <?php if (!empty($import_message)) echo $import_message; ?>
 
     <div class="card" style="max-width: 900px; padding: 1.5rem; margin: 1.5rem 0;">
@@ -330,6 +334,16 @@ foreach ($all_posts as $post) {
                         <td>
                             <div style="display:flex; gap:6px; flex-wrap:wrap;">
                                 <a class="button button-small" href="<?php echo esc_url($mailto_row_url); ?>">Email link</a>
+                                <form method="post" style="margin:0; display:flex; gap:6px; align-items:center;">
+                                    <?php wp_nonce_field('matrix_client_links_action', 'matrix_client_links_action_nonce'); ?>
+                                    <input type="hidden" name="matrix_client_links_action" value="update_mode" />
+                                    <input type="hidden" name="matrix_client_link_token" value="<?php echo esc_attr($token); ?>" />
+                                    <select name="matrix_client_link_mode">
+                                        <option value="publish" <?php selected(!$requires_approval); ?>>Publish on submit</option>
+                                        <option value="approval" <?php selected($requires_approval); ?>>Needs approval</option>
+                                    </select>
+                                    <button type="submit" class="button button-small">Save mode</button>
+                                </form>
                                 <form method="post" style="margin:0;">
                                     <?php wp_nonce_field('matrix_client_links_action', 'matrix_client_links_action_nonce'); ?>
                                     <input type="hidden" name="matrix_client_links_action" value="generate_one" />

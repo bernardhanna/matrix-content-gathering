@@ -212,6 +212,16 @@ function matrix_export_handle_actions() {
             ], wp_get_referer()));
             exit;
         }
+        if ($action === 'update_mode' && isset($_POST['matrix_client_link_token'])) {
+            $token = sanitize_text_field(wp_unslash($_POST['matrix_client_link_token']));
+            $mode = isset($_POST['matrix_client_link_mode']) ? sanitize_key(wp_unslash($_POST['matrix_client_link_mode'])) : 'publish';
+            $requires_approval = ($mode === 'approval');
+            $ok = Matrix_Export::update_client_link_requires_approval($token, $requires_approval);
+            wp_safe_redirect(add_query_arg([
+                'matrix_client_mode_updated' => $ok ? '1' : '0',
+            ], wp_get_referer()));
+            exit;
+        }
         if ($action === 'clear_all') {
             $deleted_previews = matrix_export_clear_cached_previews();
             Matrix_Export::clear_client_links();

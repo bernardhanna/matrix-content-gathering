@@ -350,14 +350,17 @@ function matrix_export_handle_actions() {
         if (!in_array($ai_provider, ['openai', 'gemini'], true)) {
             $ai_provider = 'openai';
         }
-        $ai_model = isset($_POST['matrix_ai_model']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_model'])) : '';
+        $ai_model_select = isset($_POST['matrix_ai_model_select']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_model_select'])) : '';
+        $ai_model_custom = isset($_POST['matrix_ai_model_custom']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_model_custom'])) : '';
+        $ai_model_legacy = isset($_POST['matrix_ai_model']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_model'])) : '';
+        $ai_model = $ai_model_custom !== '' ? $ai_model_custom : ($ai_model_select !== '' ? $ai_model_select : $ai_model_legacy);
         $ai_openai_key = isset($_POST['matrix_ai_openai_key']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_openai_key'])) : '';
         $ai_gemini_key = isset($_POST['matrix_ai_gemini_key']) ? sanitize_text_field(wp_unslash($_POST['matrix_ai_gemini_key'])) : '';
         $existing_ai_settings = matrix_export_get_ai_settings();
         $ai_settings = [
             'enabled' => !empty($_POST['matrix_ai_enabled']) ? 1 : 0,
             'provider' => $ai_provider,
-            'model' => $ai_model !== '' ? $ai_model : ($ai_provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini'),
+            'model' => $ai_model !== '' ? $ai_model : ($ai_provider === 'gemini' ? 'gemini-3-flash' : 'gpt-5-mini'),
             'openai_api_key' => $ai_openai_key !== '' ? $ai_openai_key : (isset($existing_ai_settings['openai_api_key']) ? (string) $existing_ai_settings['openai_api_key'] : ''),
             'gemini_api_key' => $ai_gemini_key !== '' ? $ai_gemini_key : (isset($existing_ai_settings['gemini_api_key']) ? (string) $existing_ai_settings['gemini_api_key'] : ''),
         ];
@@ -705,7 +708,7 @@ function matrix_export_get_ai_settings() {
     }
     $model = isset($raw['model']) ? sanitize_text_field((string) $raw['model']) : '';
     if ($model === '') {
-        $model = $provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini';
+        $model = $provider === 'gemini' ? 'gemini-3-flash' : 'gpt-5-mini';
     }
     return [
         'enabled' => !empty($raw['enabled']) ? 1 : 0,
@@ -778,37 +781,87 @@ function matrix_export_ai_call_provider(array $settings, $prompt) {
         if ($api_key === '') {
             return new WP_Error('missing_key', 'Gemini API key is missing.');
         }
-        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode($model) . ':generateContent?key=' . rawurlencode($api_key);
-        $resp = wp_remote_post($url, [
-            'timeout' => 45,
-            'headers' => ['Content-Type' => 'application/json'],
-            'body' => wp_json_encode([
-                'contents' => [[
-                    'role' => 'user',
-                    'parts' => [['text' => $prompt]],
-                ]],
-                'generationConfig' => [
-                    'temperature' => 0.7,
-                    'maxOutputTokens' => 1200,
-                ],
-            ]),
-        ]);
-        if (is_wp_error($resp)) {
-            return $resp;
+        $model = preg_replace('#^models/#i', '', trim((string) $model));
+        if ($model === '') {
+            $model = 'gemini-3-flash';
         }
-        $body = json_decode((string) wp_remote_retrieve_body($resp), true);
-        $text = '';
-        if (isset($body['candidates'][0]['content']['parts']) && is_array($body['candidates'][0]['content']['parts'])) {
-            foreach ($body['candidates'][0]['content']['parts'] as $part) {
-                if (isset($part['text']) && is_string($part['text'])) {
-                    $text .= $part['text'];
+        $request_payload = [
+            'contents' => [[
+                'role' => 'user',
+                'parts' => [['text' => $prompt]],
+            ]],
+            'generationConfig' => [
+                'temperature' => 0.7,
+                'maxOutputTokens' => 1200,
+            ],
+        ];
+        $request_gemini = function ($model_id, $api_version) use ($api_key, $request_payload) {
+            $url = 'https://generativelanguage.googleapis.com/' . $api_version . '/models/' . rawurlencode($model_id) . ':generateContent?key=' . rawurlencode($api_key);
+            $resp = wp_remote_post($url, [
+                'timeout' => 45,
+                'headers' => ['Content-Type' => 'application/json'],
+                'body' => wp_json_encode($request_payload),
+            ]);
+            if (is_wp_error($resp)) {
+                return $resp;
+            }
+            $status = (int) wp_remote_retrieve_response_code($resp);
+            $body = json_decode((string) wp_remote_retrieve_body($resp), true);
+            if ($status >= 400) {
+                $err_msg = '';
+                if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message'])) {
+                    $err_msg = trim($body['error']['message']);
+                }
+                if ($err_msg === '') {
+                    $err_msg = 'Gemini request failed (HTTP ' . $status . ').';
+                }
+                return new WP_Error('gemini_http_error', $err_msg);
+            }
+            if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message']) && trim($body['error']['message']) !== '') {
+                return new WP_Error('gemini_api_error', trim($body['error']['message']));
+            }
+            $text = '';
+            if (isset($body['candidates'][0]['content']['parts']) && is_array($body['candidates'][0]['content']['parts'])) {
+                foreach ($body['candidates'][0]['content']['parts'] as $part) {
+                    if (isset($part['text']) && is_string($part['text'])) {
+                        $text .= $part['text'];
+                    }
+                }
+            }
+            if ($text === '' && isset($body['candidates'][0]['output']) && is_string($body['candidates'][0]['output'])) {
+                $text = $body['candidates'][0]['output'];
+            }
+            if ($text === '') {
+                return new WP_Error('empty_response', 'Gemini returned an empty response.');
+            }
+            return $text;
+        };
+
+        $versions = ['v1', 'v1beta'];
+        foreach ($versions as $version) {
+            $result = $request_gemini($model, $version);
+            if (!is_wp_error($result)) {
+                return $result;
+            }
+            $msg = strtolower($result->get_error_message());
+            if (strpos($msg, 'not found') === false && strpos($msg, 'not supported') === false) {
+                return $result;
+            }
+        }
+
+        $fallback_models = ['gemini-3-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+        foreach ($fallback_models as $fallback_model) {
+            if ($fallback_model === $model) {
+                continue;
+            }
+            foreach ($versions as $version) {
+                $result = $request_gemini($fallback_model, $version);
+                if (!is_wp_error($result)) {
+                    return $result;
                 }
             }
         }
-        if ($text === '') {
-            return new WP_Error('empty_response', 'Gemini returned an empty response.');
-        }
-        return $text;
+        return new WP_Error('gemini_model_unavailable', 'Selected Gemini model is unavailable. Try gemini-3-flash or gemini-3.1-flash-lite.');
     }
 
     $api_key = isset($settings['openai_api_key']) ? (string) $settings['openai_api_key'] : '';
@@ -839,7 +892,21 @@ function matrix_export_ai_call_provider(array $settings, $prompt) {
     if (is_wp_error($resp)) {
         return $resp;
     }
+    $status = (int) wp_remote_retrieve_response_code($resp);
     $body = json_decode((string) wp_remote_retrieve_body($resp), true);
+    if ($status >= 400) {
+        $err_msg = '';
+        if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message'])) {
+            $err_msg = trim($body['error']['message']);
+        }
+        if ($err_msg === '') {
+            $err_msg = 'OpenAI request failed (HTTP ' . $status . ').';
+        }
+        return new WP_Error('openai_http_error', $err_msg);
+    }
+    if (is_array($body) && isset($body['error']['message']) && is_string($body['error']['message']) && trim($body['error']['message']) !== '') {
+        return new WP_Error('openai_api_error', trim($body['error']['message']));
+    }
     $text = isset($body['choices'][0]['message']['content']) ? (string) $body['choices'][0]['message']['content'] : '';
     if ($text === '') {
         return new WP_Error('empty_response', 'OpenAI returned an empty response.');
@@ -917,8 +984,25 @@ function matrix_export_ajax_ai_generate_block() {
     if (is_wp_error($generated)) {
         wp_send_json_error(['message' => $generated->get_error_message()], 500);
     }
+    $generated_text = trim((string) $generated);
     $json = matrix_export_ai_extract_json_object((string) $generated);
     if (!is_array($json) || !isset($json['fields']) || !is_array($json['fields'])) {
+        // Tolerate plain-text responses by mapping text to the first requested field.
+        if (!empty($allowed_field_keys) && $generated_text !== '') {
+            $single_key = (string) array_key_first($allowed_field_keys);
+            if (preg_match('/```(?:[a-zA-Z0-9_-]+)?\s*(.*?)\s*```/s', $generated_text, $m)) {
+                $generated_text = trim((string) $m[1]);
+            }
+            if ($generated_text === '') {
+                wp_send_json_error(['message' => 'AI returned empty output. Try again or switch model.'], 500);
+            }
+            wp_send_json_success([
+                'suggestions' => [$single_key => $generated_text],
+                'provider' => $settings['provider'],
+                'model' => $settings['model'],
+                'fallback' => 'plain_text',
+            ]);
+        }
         wp_send_json_error(['message' => 'AI response was not valid JSON. Try again.'], 500);
     }
     $suggestions = [];

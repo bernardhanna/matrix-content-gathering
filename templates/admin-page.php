@@ -12,7 +12,30 @@ $review_notify_email = get_option(MATRIX_EXPORT_REVIEW_NOTIFY_EMAIL_OPTION, '');
 $ai_settings = isset($ai_settings) && is_array($ai_settings) ? $ai_settings : (function_exists('matrix_export_get_ai_settings') ? matrix_export_get_ai_settings() : []);
 $ai_enabled = !empty($ai_settings['enabled']);
 $ai_provider = isset($ai_settings['provider']) ? (string) $ai_settings['provider'] : 'openai';
-$ai_model = isset($ai_settings['model']) ? (string) $ai_settings['model'] : ($ai_provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
+$ai_model = isset($ai_settings['model']) ? (string) $ai_settings['model'] : ($ai_provider === 'gemini' ? 'gemini-3-flash' : 'gpt-5-mini');
+$ai_openai_models = [
+    'gpt-5',
+    'gpt-5-mini',
+    'gpt-5-nano',
+    'gpt-4.1',
+    'gpt-4.1-mini',
+    'gpt-4o',
+    'gpt-4o-mini',
+    'o4-mini',
+];
+$ai_gemini_models = [
+    'gemini-3.1-pro',
+    'gemini-3-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+];
+$all_ai_models = array_values(array_unique(array_merge($ai_openai_models, $ai_gemini_models)));
+$ai_model_select = in_array($ai_model, $all_ai_models, true) ? $ai_model : ($ai_provider === 'gemini' ? 'gemini-3-flash' : 'gpt-5-mini');
+$ai_model_custom = in_array($ai_model, $all_ai_models, true) ? '' : $ai_model;
 $ai_openai_key_set = !empty($ai_settings['openai_api_key']);
 $ai_gemini_key_set = !empty($ai_settings['gemini_api_key']);
 $runtime_settings = isset($runtime_settings) && is_array($runtime_settings) ? $runtime_settings : (function_exists('matrix_export_get_runtime_settings') ? matrix_export_get_runtime_settings() : []);
@@ -473,14 +496,29 @@ foreach ($all_posts as $post) {
                 </p>
                 <p style="margin: 0.5rem 0;">
                     <label style="margin-right: 1rem;">Provider
-                        <select name="matrix_ai_provider">
+                        <select name="matrix_ai_provider" id="matrix-ai-provider-select">
                             <option value="openai" <?php selected($ai_provider, 'openai'); ?>>OpenAI</option>
                             <option value="gemini" <?php selected($ai_provider, 'gemini'); ?>>Gemini</option>
                         </select>
                     </label>
                     <label>Model
-                        <input type="text" name="matrix_ai_model" value="<?php echo esc_attr($ai_model); ?>" placeholder="gpt-4o-mini or gemini-1.5-flash" style="min-width: 260px;" />
+                        <select name="matrix_ai_model_select" id="matrix-ai-model-select">
+                            <optgroup label="OpenAI">
+                                <?php foreach ($ai_openai_models as $m) : ?>
+                                    <option value="<?php echo esc_attr($m); ?>" <?php selected($ai_model_select, $m); ?>><?php echo esc_html($m); ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                            <optgroup label="Gemini">
+                                <?php foreach ($ai_gemini_models as $m) : ?>
+                                    <option value="<?php echo esc_attr($m); ?>" <?php selected($ai_model_select, $m); ?>><?php echo esc_html($m); ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                        </select>
                     </label>
+                </p>
+                <p style="margin: 0.35rem 0;">
+                    <label style="display:block;">Custom model (optional override)</label>
+                    <input type="text" name="matrix_ai_model_custom" value="<?php echo esc_attr($ai_model_custom); ?>" placeholder="Use only if your account has a different model ID" style="min-width: 420px;" />
                 </p>
                 <p style="margin: 0.35rem 0;">
                     <label style="display:block;">OpenAI API key <?php echo $ai_openai_key_set ? '<em>(saved)</em>' : ''; ?></label>
@@ -546,6 +584,26 @@ foreach ($all_posts as $post) {
     });
     var initial = window.location.hash === '#matrix-tab-settings' ? 'settings' : 'content';
     activate(initial);
+})();
+
+(function() {
+    var providerSelect = document.getElementById('matrix-ai-provider-select');
+    var modelSelect = document.getElementById('matrix-ai-model-select');
+    if (providerSelect && modelSelect) {
+        var openaiSet = new Set(['gpt-5','gpt-5-mini','gpt-5-nano','gpt-4.1','gpt-4.1-mini','gpt-4o','gpt-4o-mini','o4-mini']);
+        var geminiSet = new Set(['gemini-3.1-pro','gemini-3-flash','gemini-3.1-flash-lite','gemini-2.5-pro','gemini-2.5-flash','gemini-2.0-flash','gemini-1.5-pro','gemini-1.5-flash']);
+        function nudgeModelForProvider() {
+            var provider = providerSelect.value || 'openai';
+            var current = modelSelect.value || '';
+            if (provider === 'gemini' && !geminiSet.has(current)) {
+                modelSelect.value = 'gemini-3-flash';
+            }
+            if (provider === 'openai' && !openaiSet.has(current)) {
+                modelSelect.value = 'gpt-5-mini';
+            }
+        }
+        providerSelect.addEventListener('change', nudgeModelForProvider);
+    }
 })();
 
 (function() {

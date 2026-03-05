@@ -23,6 +23,17 @@ $client_requires_approval = !empty($data['client_requires_approval']);
 $matrix_ai_enabled = !empty($data['matrix_ai_enabled']);
 $matrix_ai_url = isset($data['matrix_ai_generate_ajax_url']) ? (string) $data['matrix_ai_generate_ajax_url'] : '';
 $matrix_ai_nonce = isset($data['matrix_ai_generate_nonce']) ? (string) $data['matrix_ai_generate_nonce'] : '';
+$strict_settings = isset($data['matrix_strict_settings']) && is_array($data['matrix_strict_settings'])
+    ? $data['matrix_strict_settings']
+    : (function_exists('matrix_export_get_strict_settings') ? matrix_export_get_strict_settings() : []);
+$client_strict_mode = !empty($data['client_strict_mode']);
+$strict_can_configure = !empty($data['strict_can_configure']);
+$strict_field_rules = isset($data['strict_field_rules']) && is_array($data['strict_field_rules']) ? $data['strict_field_rules'] : [];
+$strict_default_min_words = isset($strict_settings['default_min_words']) ? max(0, (int) $strict_settings['default_min_words']) : 0;
+$strict_default_min_chars = isset($strict_settings['default_min_chars']) ? max(0, (int) $strict_settings['default_min_chars']) : 0;
+$strict_enforce_publish_only = isset($strict_settings['enforce_publish_only']) ? !empty($strict_settings['enforce_publish_only']) : true;
+$strict_enable_spellcheck = !empty($strict_settings['enable_spellcheck']);
+$strict_spellcheck_attr = $strict_enable_spellcheck ? ' spellcheck="true"' : '';
 $site_name = function_exists('get_bloginfo') ? (string) get_bloginfo('name') : '';
 $block_preview_urls = $is_on_site ? Matrix_Export::ensure_block_preview_urls($rows) : [];
 $has_previewable_blocks = false;
@@ -230,6 +241,14 @@ if (!$in_theme) : ?>
         .matrix-ai-field-panel[aria-busy="true"] .matrix-ai-field-status { color: var(--matrix-slate-700); }
         .matrix-ai-field-preview { margin-top: 6px; padding: 8px; border: 1px solid #e2e8f0; background: #fff; border-radius: 4px; white-space: pre-wrap; }
         .matrix-ai-field-preview[hidden] { display: none !important; }
+        .matrix-strict-field-open { min-width: 34px; padding: 0 10px; }
+        .matrix-strict-field-panel { display: none; border: 1px solid #dcdcde; border-radius: 8px; padding: 10px; margin-top: 8px; background: #f7f8fa; }
+        .matrix-strict-field-panel.is-open { display: block; }
+        .matrix-strict-grid { display: grid; grid-template-columns: repeat(2, minmax(140px, 1fr)); gap: 8px 10px; }
+        .matrix-strict-grid label { display: block; font-weight: 600; }
+        .matrix-strict-grid input[type="number"] { width: 100%; min-width: 0; }
+        .matrix-strict-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .matrix-strict-status { margin: 0; min-height: 1.2em; }
         @media (max-width: 768px) {
             h1 { font-size: 1.7rem; }
             .matrix-auth-actions { align-items: center; }
@@ -405,6 +424,14 @@ if (!$in_theme) : ?>
 .matrix-content-edit-wrap .matrix-ai-field-panel[aria-busy="true"] .matrix-ai-field-status { color: var(--matrix-slate-700); }
 .matrix-content-edit-wrap .matrix-ai-field-preview { margin-top: 6px; padding: 8px; border: 1px solid #e2e8f0; background: #fff; border-radius: 4px; white-space: pre-wrap; }
 .matrix-content-edit-wrap .matrix-ai-field-preview[hidden] { display: none !important; }
+.matrix-content-edit-wrap .matrix-strict-field-open { min-width: 34px; padding: 0 10px; }
+.matrix-content-edit-wrap .matrix-strict-field-panel { display: none; border: 1px solid #dcdcde; border-radius: 8px; padding: 10px; margin-top: 8px; background: #f7f8fa; }
+.matrix-content-edit-wrap .matrix-strict-field-panel.is-open { display: block; }
+.matrix-content-edit-wrap .matrix-strict-grid { display: grid; grid-template-columns: repeat(2, minmax(140px, 1fr)); gap: 8px 10px; }
+.matrix-content-edit-wrap .matrix-strict-grid label { display: block; font-weight: 600; }
+.matrix-content-edit-wrap .matrix-strict-grid input[type="number"] { width: 100%; min-width: 0; }
+.matrix-content-edit-wrap .matrix-strict-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.matrix-content-edit-wrap .matrix-strict-status { margin: 0; min-height: 1.2em; }
 @media (max-width: 768px) {
     .matrix-content-edit-wrap h1 { font-size: 1.7rem; }
     .matrix-content-edit-wrap .matrix-auth-actions { align-items: center; }
@@ -813,13 +840,33 @@ if (!$in_theme) : ?>
                                 $val = isset($parsed['value']) ? $parsed['value'] : '';
                                 $long = Matrix_Export::is_long_text_field($field_name, $val);
                                 $use_editor = $is_on_site && $long && function_exists('wp_editor');
+                                $strict_rule_key = (string) $i . '::' . (string) $field_name;
+                                $strict_rule = isset($strict_field_rules[$strict_rule_key]) && is_array($strict_field_rules[$strict_rule_key]) ? $strict_field_rules[$strict_rule_key] : [];
+                                $strict_rule_enabled = !empty($strict_rule['enabled']);
+                                $strict_rule_enable_ai_mode = array_key_exists('enable_ai_mode', $strict_rule) ? !empty($strict_rule['enable_ai_mode']) : true;
+                                $strict_rule_enable_required = !empty($strict_rule['enable_required']);
+                                $strict_rule_enable_min_words = !empty($strict_rule['enable_min_words']);
+                                $strict_rule_enable_max_words = !empty($strict_rule['enable_max_words']);
+                                $strict_rule_enable_min_chars = !empty($strict_rule['enable_min_chars']);
+                                $strict_rule_enable_max_chars = !empty($strict_rule['enable_max_chars']);
+                                $strict_rule_min_words = isset($strict_rule['min_words']) ? max(0, (int) $strict_rule['min_words']) : 0;
+                                $strict_rule_max_words = isset($strict_rule['max_words']) ? max(0, (int) $strict_rule['max_words']) : 0;
+                                $strict_rule_min_chars = isset($strict_rule['min_chars']) ? max(0, (int) $strict_rule['min_chars']) : 0;
+                                $strict_rule_max_chars = isset($strict_rule['max_chars']) ? max(0, (int) $strict_rule['max_chars']) : 0;
                         ?>
                             <div class="field">
                                 <div class="matrix-field-head">
                                     <label class="field-label" for="<?php echo esc_attr($field_id); ?>"><?php echo esc_html($field_label); ?></label>
-                                    <?php if ($matrix_ai_enabled) : ?>
-                                        <button type="button" class="button button-small matrix-ai-field-open matrix-ai-btn matrix-ai-btn-primary" data-ai-panel-id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" aria-controls="<?php echo esc_attr($field_id . '-ai-panel'); ?>" aria-expanded="false">A.I mode</button>
-                                    <?php endif; ?>
+                                    <span style="display:inline-flex; gap:6px; align-items:center;">
+                                        <?php if ($matrix_ai_enabled && $strict_rule_enable_ai_mode) : ?>
+                                            <button type="button" class="button button-small matrix-ai-field-open matrix-ai-btn matrix-ai-btn-primary" data-ai-panel-id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" aria-controls="<?php echo esc_attr($field_id . '-ai-panel'); ?>" aria-expanded="false">A.I mode</button>
+                                        <?php endif; ?>
+                                        <?php if ($client_strict_mode && $strict_can_configure) :
+                                            $strict_panel_id = $field_id . '-strict-panel';
+                                        ?>
+                                            <button type="button" class="button button-small matrix-ai-btn matrix-ai-btn-secondary matrix-strict-field-open" data-strict-panel-id="<?php echo esc_attr($strict_panel_id); ?>" aria-controls="<?php echo esc_attr($strict_panel_id); ?>" aria-expanded="false" title="Strict mode field settings" aria-label="Strict mode field settings">&#9881;</button>
+                                        <?php endif; ?>
+                                    </span>
                                 </div>
                                 <?php
                                 $is_required = (bool) preg_match('/(^|__|_)(headline|heading|title)($|__|_)/i', (string) $field_name);
@@ -843,7 +890,7 @@ if (!$in_theme) : ?>
                                 <?php endif; if ($is_required || $is_summary) : ?>
                                         <p id="<?php echo esc_attr($editor_id . '-count'); ?>" class="matrix-count-hint" aria-live="polite"></p>
                                 <?php endif;
-                                    if ($matrix_ai_enabled) : ?>
+                                    if ($matrix_ai_enabled && ($strict_rule_enable_ai_mode || ($client_strict_mode && $strict_can_configure))) : ?>
                                         <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($editor_id); ?>" role="group" aria-label="<?php echo esc_attr($field_label . ' AI tools'); ?>">
                                             <label>Instructions (optional)</label>
                                             <textarea class="matrix-ai-field-instructions" rows="2" placeholder="Specific direction for this field..."></textarea>
@@ -862,13 +909,47 @@ if (!$in_theme) : ?>
                                             <p class="matrix-ai-field-status description" role="status" aria-live="polite"></p>
                                             <div class="matrix-ai-field-preview" hidden></div>
                                         </div>
+                                        <?php if ($client_strict_mode && $strict_can_configure) : ?>
+                                            <div id="<?php echo esc_attr($field_id . '-strict-panel'); ?>" class="matrix-strict-field-panel" data-rule-key="<?php echo esc_attr($strict_rule_key); ?>" aria-label="<?php echo esc_attr($field_label . ' strict settings'); ?>">
+                                                <label style="display:block;margin-bottom:8px;">
+                                                    <input type="checkbox" class="matrix-strict-enabled" <?php checked($strict_rule_enabled); ?> />
+                                                    Enable strict checks for this field
+                                                </label>
+                                                <label style="display:block;margin-bottom:8px;">
+                                                    <input type="checkbox" class="matrix-strict-enable-ai-mode" <?php checked($strict_rule_enable_ai_mode); ?> />
+                                                    Enable A.I mode for this field
+                                                </label>
+                                                <label style="display:block;margin-bottom:8px;">
+                                                    <input type="checkbox" class="matrix-strict-enable-required" <?php checked($strict_rule_enable_required); ?> />
+                                                    Required content (cannot submit with empty value)
+                                                </label>
+                                                <div class="matrix-strict-grid">
+                                                    <label><input type="checkbox" class="matrix-strict-enable-min-words" <?php checked($strict_rule_enable_min_words); ?> /> Min words
+                                                        <input type="number" class="matrix-strict-min-words" min="0" step="1" value="<?php echo (int) $strict_rule_min_words; ?>" />
+                                                    </label>
+                                                    <label><input type="checkbox" class="matrix-strict-enable-max-words" <?php checked($strict_rule_enable_max_words); ?> /> Max words
+                                                        <input type="number" class="matrix-strict-max-words" min="0" step="1" value="<?php echo (int) $strict_rule_max_words; ?>" />
+                                                    </label>
+                                                    <label><input type="checkbox" class="matrix-strict-enable-min-chars" <?php checked($strict_rule_enable_min_chars); ?> /> Min characters
+                                                        <input type="number" class="matrix-strict-min-chars" min="0" step="1" value="<?php echo (int) $strict_rule_min_chars; ?>" />
+                                                    </label>
+                                                    <label><input type="checkbox" class="matrix-strict-enable-max-chars" <?php checked($strict_rule_enable_max_chars); ?> /> Max characters
+                                                        <input type="number" class="matrix-strict-max-chars" min="0" step="1" value="<?php echo (int) $strict_rule_max_chars; ?>" />
+                                                    </label>
+                                                </div>
+                                                <div class="matrix-strict-actions">
+                                                    <button type="button" class="button button-small matrix-ai-btn matrix-ai-btn-secondary matrix-strict-save">Save strict settings</button>
+                                                    <p class="matrix-strict-status description" role="status" aria-live="polite"></p>
+                                                </div>
+                                            </div>
+                                        <?php endif; ?>
                                 <?php endif;
                                 elseif ($long) : ?>
                                     <textarea id="<?php echo esc_attr($field_id); ?>" name="matrix_field[<?php echo (int) $i; ?>][<?php echo esc_attr($field_name); ?>]" rows="6" class="matrix-textarea-html"<?php echo $is_required ? ' data-matrix-required="1"' : ''; ?><?php echo $count_attr; ?> data-matrix-label="<?php echo esc_attr($field_label); ?>"><?php echo esc_textarea($val); ?></textarea>
                                     <?php if ($field_help !== '') : ?><p class="matrix-help-text"><?php echo esc_html($field_help); ?></p><?php endif; ?>
                                     <?php if ($is_required || $is_summary) : ?><p id="<?php echo esc_attr($field_id . '-count'); ?>" class="matrix-count-hint" aria-live="polite"></p><?php endif; ?>
                                     <p id="<?php echo esc_attr($field_id . '-error'); ?>" class="matrix-field-error" aria-live="polite"></p>
-                                    <?php if ($matrix_ai_enabled) : ?>
+                                    <?php if ($matrix_ai_enabled && ($strict_rule_enable_ai_mode || ($client_strict_mode && $strict_can_configure))) : ?>
                                         <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($field_id); ?>" role="group" aria-label="<?php echo esc_attr($field_label . ' AI tools'); ?>">
                                             <label>Instructions (optional)</label>
                                             <textarea class="matrix-ai-field-instructions" rows="2" placeholder="Specific direction for this field..."></textarea>
@@ -887,13 +968,47 @@ if (!$in_theme) : ?>
                                             <p class="matrix-ai-field-status description" role="status" aria-live="polite"></p>
                                             <div class="matrix-ai-field-preview" hidden></div>
                                         </div>
+                                        <?php if ($client_strict_mode && $strict_can_configure) : ?>
+                                            <div id="<?php echo esc_attr($field_id . '-strict-panel'); ?>" class="matrix-strict-field-panel" data-rule-key="<?php echo esc_attr($strict_rule_key); ?>" aria-label="<?php echo esc_attr($field_label . ' strict settings'); ?>">
+                                                <label style="display:block;margin-bottom:8px;">
+                                                    <input type="checkbox" class="matrix-strict-enabled" <?php checked($strict_rule_enabled); ?> />
+                                                    Enable strict checks for this field
+                                                </label>
+                                                <label style="display:block;margin-bottom:8px;">
+                                                    <input type="checkbox" class="matrix-strict-enable-ai-mode" <?php checked($strict_rule_enable_ai_mode); ?> />
+                                                    Enable A.I mode for this field
+                                                </label>
+                                                <label style="display:block;margin-bottom:8px;">
+                                                    <input type="checkbox" class="matrix-strict-enable-required" <?php checked($strict_rule_enable_required); ?> />
+                                                    Required content (cannot submit with empty value)
+                                                </label>
+                                                <div class="matrix-strict-grid">
+                                                    <label><input type="checkbox" class="matrix-strict-enable-min-words" <?php checked($strict_rule_enable_min_words); ?> /> Min words
+                                                        <input type="number" class="matrix-strict-min-words" min="0" step="1" value="<?php echo (int) $strict_rule_min_words; ?>" />
+                                                    </label>
+                                                    <label><input type="checkbox" class="matrix-strict-enable-max-words" <?php checked($strict_rule_enable_max_words); ?> /> Max words
+                                                        <input type="number" class="matrix-strict-max-words" min="0" step="1" value="<?php echo (int) $strict_rule_max_words; ?>" />
+                                                    </label>
+                                                    <label><input type="checkbox" class="matrix-strict-enable-min-chars" <?php checked($strict_rule_enable_min_chars); ?> /> Min characters
+                                                        <input type="number" class="matrix-strict-min-chars" min="0" step="1" value="<?php echo (int) $strict_rule_min_chars; ?>" />
+                                                    </label>
+                                                    <label><input type="checkbox" class="matrix-strict-enable-max-chars" <?php checked($strict_rule_enable_max_chars); ?> /> Max characters
+                                                        <input type="number" class="matrix-strict-max-chars" min="0" step="1" value="<?php echo (int) $strict_rule_max_chars; ?>" />
+                                                    </label>
+                                                </div>
+                                                <div class="matrix-strict-actions">
+                                                    <button type="button" class="button button-small matrix-ai-btn matrix-ai-btn-secondary matrix-strict-save">Save strict settings</button>
+                                                    <p class="matrix-strict-status description" role="status" aria-live="polite"></p>
+                                                </div>
+                                            </div>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                 <?php else : ?>
                                     <input id="<?php echo esc_attr($field_id); ?>" type="text" name="matrix_field[<?php echo (int) $i; ?>][<?php echo esc_attr($field_name); ?>]" value="<?php echo esc_attr($val); ?>"<?php echo $is_required ? ' data-matrix-required="1"' : ''; ?><?php echo $count_attr; ?> data-matrix-label="<?php echo esc_attr($field_label); ?>" />
                                     <?php if ($field_help !== '') : ?><p class="matrix-help-text"><?php echo esc_html($field_help); ?></p><?php endif; ?>
                                     <?php if ($is_required || $is_summary) : ?><p id="<?php echo esc_attr($field_id . '-count'); ?>" class="matrix-count-hint" aria-live="polite"></p><?php endif; ?>
                                     <p id="<?php echo esc_attr($field_id . '-error'); ?>" class="matrix-field-error" aria-live="polite"></p>
-                                    <?php if ($matrix_ai_enabled) : ?>
+                                    <?php if ($matrix_ai_enabled && ($strict_rule_enable_ai_mode || ($client_strict_mode && $strict_can_configure))) : ?>
                                         <div id="<?php echo esc_attr($field_id . '-ai-panel'); ?>" class="matrix-ai-field-panel" data-row-index="<?php echo (int) $i; ?>" data-field-key="<?php echo esc_attr($field_name); ?>" data-field-label="<?php echo esc_attr($field_label); ?>" data-field-target-id="<?php echo esc_attr($field_id); ?>" role="group" aria-label="<?php echo esc_attr($field_label . ' AI tools'); ?>">
                                             <label>Instructions (optional)</label>
                                             <textarea class="matrix-ai-field-instructions" rows="2" placeholder="Specific direction for this field..."></textarea>
@@ -912,6 +1027,40 @@ if (!$in_theme) : ?>
                                             <p class="matrix-ai-field-status description" role="status" aria-live="polite"></p>
                                             <div class="matrix-ai-field-preview" hidden></div>
                                         </div>
+                                        <?php if ($client_strict_mode && $strict_can_configure) : ?>
+                                            <div id="<?php echo esc_attr($field_id . '-strict-panel'); ?>" class="matrix-strict-field-panel" data-rule-key="<?php echo esc_attr($strict_rule_key); ?>" aria-label="<?php echo esc_attr($field_label . ' strict settings'); ?>">
+                                                <label style="display:block;margin-bottom:8px;">
+                                                    <input type="checkbox" class="matrix-strict-enabled" <?php checked($strict_rule_enabled); ?> />
+                                                    Enable strict checks for this field
+                                                </label>
+                                                <label style="display:block;margin-bottom:8px;">
+                                                    <input type="checkbox" class="matrix-strict-enable-ai-mode" <?php checked($strict_rule_enable_ai_mode); ?> />
+                                                    Enable A.I mode for this field
+                                                </label>
+                                                <label style="display:block;margin-bottom:8px;">
+                                                    <input type="checkbox" class="matrix-strict-enable-required" <?php checked($strict_rule_enable_required); ?> />
+                                                    Required content (cannot submit with empty value)
+                                                </label>
+                                                <div class="matrix-strict-grid">
+                                                    <label><input type="checkbox" class="matrix-strict-enable-min-words" <?php checked($strict_rule_enable_min_words); ?> /> Min words
+                                                        <input type="number" class="matrix-strict-min-words" min="0" step="1" value="<?php echo (int) $strict_rule_min_words; ?>" />
+                                                    </label>
+                                                    <label><input type="checkbox" class="matrix-strict-enable-max-words" <?php checked($strict_rule_enable_max_words); ?> /> Max words
+                                                        <input type="number" class="matrix-strict-max-words" min="0" step="1" value="<?php echo (int) $strict_rule_max_words; ?>" />
+                                                    </label>
+                                                    <label><input type="checkbox" class="matrix-strict-enable-min-chars" <?php checked($strict_rule_enable_min_chars); ?> /> Min characters
+                                                        <input type="number" class="matrix-strict-min-chars" min="0" step="1" value="<?php echo (int) $strict_rule_min_chars; ?>" />
+                                                    </label>
+                                                    <label><input type="checkbox" class="matrix-strict-enable-max-chars" <?php checked($strict_rule_enable_max_chars); ?> /> Max characters
+                                                        <input type="number" class="matrix-strict-max-chars" min="0" step="1" value="<?php echo (int) $strict_rule_max_chars; ?>" />
+                                                    </label>
+                                                </div>
+                                                <div class="matrix-strict-actions">
+                                                    <button type="button" class="button button-small matrix-ai-btn matrix-ai-btn-secondary matrix-strict-save">Save strict settings</button>
+                                                    <p class="matrix-strict-status description" role="status" aria-live="polite"></p>
+                                                </div>
+                                            </div>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                 <?php endif; ?>
                             </div>
@@ -965,6 +1114,13 @@ if (!$in_theme) : ?>
         var duplicateUrl = form ? form.getAttribute('data-matrix-duplicate-url') : '';
         var duplicateNonce = form ? form.getAttribute('data-matrix-duplicate-nonce') : '';
         var autosaveIntervalMs = form ? parseInt(form.getAttribute('data-matrix-autosave-interval-ms'), 10) : 75000;
+        var strictEnabled = <?php echo $client_strict_mode ? 'true' : 'false'; ?>;
+        var strictEnforcePublishOnly = <?php echo $strict_enforce_publish_only ? 'true' : 'false'; ?>;
+        var strictSpellcheck = <?php echo $strict_enable_spellcheck ? 'true' : 'false'; ?>;
+        var strictCanConfigure = <?php echo $strict_can_configure ? 'true' : 'false'; ?>;
+        var strictRuleSaveUrl = <?php echo wp_json_encode(isset($data['matrix_strict_rule_save_ajax_url']) ? (string) $data['matrix_strict_rule_save_ajax_url'] : ''); ?>;
+        var strictRuleSaveNonce = <?php echo wp_json_encode(isset($data['matrix_strict_rule_save_nonce']) ? (string) $data['matrix_strict_rule_save_nonce'] : ''); ?>;
+        var strictFieldRules = <?php echo wp_json_encode($strict_field_rules); ?>;
         var tokenInput = form ? form.querySelector('input[name="matrix_form_token"]') : null;
         var formErrorsWrap = document.getElementById('matrix-form-errors');
         var formErrorsList = document.getElementById('matrix-form-errors-list');
@@ -976,6 +1132,11 @@ if (!$in_theme) : ?>
         var lastSubmitButton = null;
         var baselineSnapshot = '';
         var publishReviewApproved = false;
+        if (strictSpellcheck && form) {
+            form.querySelectorAll('input[type="text"], textarea').forEach(function(el) {
+                el.setAttribute('spellcheck', 'true');
+            });
+        }
         if (instructionsOpenBtn && instructionsModal) {
             instructionsOpenBtn.addEventListener('click', function() {
                 instructionsModal.classList.add('matrix-visible');
@@ -1136,6 +1297,30 @@ if (!$in_theme) : ?>
             var m = String(name || '').match(re);
             return m && m[1] ? m[1] : '';
         }
+        function getStrictRuleKeyFromField(field) {
+            if (!field || !field.name) return '';
+            var m = String(field.name).match(/^matrix_field\[(\d+)\]\[([^\]]+)\]/);
+            if (!m || !m[1] || !m[2]) return '';
+            return String(m[1]) + '::' + String(m[2]);
+        }
+        function getStrictRule(ruleKey) {
+            if (!ruleKey || !strictFieldRules || typeof strictFieldRules !== 'object') return null;
+            var rule = strictFieldRules[ruleKey];
+            if (!rule || typeof rule !== 'object') return null;
+            return {
+                enabled: !!rule.enabled,
+                enable_ai_mode: (typeof rule.enable_ai_mode === 'undefined') ? true : !!rule.enable_ai_mode,
+                enable_required: !!rule.enable_required,
+                enable_min_words: !!rule.enable_min_words,
+                enable_max_words: !!rule.enable_max_words,
+                enable_min_chars: !!rule.enable_min_chars,
+                enable_max_chars: !!rule.enable_max_chars,
+                min_words: Math.max(0, parseInt(rule.min_words || 0, 10) || 0),
+                max_words: Math.max(0, parseInt(rule.max_words || 0, 10) || 0),
+                min_chars: Math.max(0, parseInt(rule.min_chars || 0, 10) || 0),
+                max_chars: Math.max(0, parseInt(rule.max_chars || 0, 10) || 0)
+            };
+        }
         function getTinyEditorForField(field) {
             if (!field || !field.id) return null;
             if (window.tinyMCE && typeof window.tinyMCE.get === 'function') {
@@ -1228,6 +1413,90 @@ if (!$in_theme) : ?>
             if (isLikelyJsonBlob(unfenced)) return '';
             if (/^\s*```/.test(text)) return '';
             return unfenced;
+        }
+        function initStrictFieldAssist() {
+            if (!strictEnabled || !strictCanConfigure || !strictRuleSaveUrl || !strictRuleSaveNonce || !form) return;
+            wrap.querySelectorAll('.matrix-strict-field-open').forEach(function(openBtn) {
+                var panelId = openBtn.getAttribute('data-strict-panel-id') || '';
+                var panel = panelId ? document.getElementById(panelId) : null;
+                if (!panel) return;
+                var saveBtn = panel.querySelector('.matrix-strict-save');
+                var statusEl = panel.querySelector('.matrix-strict-status');
+                var enabledEl = panel.querySelector('.matrix-strict-enabled');
+                var enableAiModeEl = panel.querySelector('.matrix-strict-enable-ai-mode');
+                var enableRequiredEl = panel.querySelector('.matrix-strict-enable-required');
+                var enableMinWordsEl = panel.querySelector('.matrix-strict-enable-min-words');
+                var enableMaxWordsEl = panel.querySelector('.matrix-strict-enable-max-words');
+                var enableMinCharsEl = panel.querySelector('.matrix-strict-enable-min-chars');
+                var enableMaxCharsEl = panel.querySelector('.matrix-strict-enable-max-chars');
+                var minWordsEl = panel.querySelector('.matrix-strict-min-words');
+                var maxWordsEl = panel.querySelector('.matrix-strict-max-words');
+                var minCharsEl = panel.querySelector('.matrix-strict-min-chars');
+                var maxCharsEl = panel.querySelector('.matrix-strict-max-chars');
+                var ruleKey = panel.getAttribute('data-rule-key') || '';
+                if (!saveBtn || !statusEl || !enabledEl || !enableAiModeEl || !enableRequiredEl || !enableMinWordsEl || !enableMaxWordsEl || !enableMinCharsEl || !enableMaxCharsEl || !minWordsEl || !maxWordsEl || !minCharsEl || !maxCharsEl || !ruleKey) return;
+                openBtn.addEventListener('click', function() {
+                    var isOpen = panel.classList.toggle('is-open');
+                    openBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                });
+                saveBtn.addEventListener('click', function() {
+                    var token = tokenInput ? String(tokenInput.value || '') : '';
+                    if (!token) {
+                        statusEl.textContent = 'Missing form token.';
+                        return;
+                    }
+                    var minWords = Math.max(0, parseInt(minWordsEl.value || '0', 10) || 0);
+                    var maxWords = Math.max(0, parseInt(maxWordsEl.value || '0', 10) || 0);
+                    var minChars = Math.max(0, parseInt(minCharsEl.value || '0', 10) || 0);
+                    var maxChars = Math.max(0, parseInt(maxCharsEl.value || '0', 10) || 0);
+                    if (maxWords > 0 && minWords > 0 && maxWords < minWords) {
+                        statusEl.textContent = 'Max words must be greater than or equal to min words.';
+                        return;
+                    }
+                    if (maxChars > 0 && minChars > 0 && maxChars < minChars) {
+                        statusEl.textContent = 'Max characters must be greater than or equal to min characters.';
+                        return;
+                    }
+                    saveBtn.disabled = true;
+                    statusEl.textContent = 'Saving...';
+                    var body = new FormData();
+                    body.set('action', 'matrix_export_save_strict_rule');
+                    body.set('matrix_strict_rule_nonce', strictRuleSaveNonce);
+                    body.set('matrix_form_token', token);
+                    body.set('rule_key', ruleKey);
+                    body.set('enabled', enabledEl.checked ? '1' : '0');
+                    body.set('enable_ai_mode', enableAiModeEl.checked ? '1' : '0');
+                    body.set('enable_required', enableRequiredEl.checked ? '1' : '0');
+                    body.set('enable_min_words', enableMinWordsEl.checked ? '1' : '0');
+                    body.set('enable_max_words', enableMaxWordsEl.checked ? '1' : '0');
+                    body.set('enable_min_chars', enableMinCharsEl.checked ? '1' : '0');
+                    body.set('enable_max_chars', enableMaxCharsEl.checked ? '1' : '0');
+                    body.set('min_words', String(minWords));
+                    body.set('max_words', String(maxWords));
+                    body.set('min_chars', String(minChars));
+                    body.set('max_chars', String(maxChars));
+                    fetch(strictRuleSaveUrl, { method: 'POST', body: body, credentials: 'same-origin' })
+                        .then(function(r) { return r.json(); })
+                        .then(function(res) {
+                            if (!res || !res.success || !res.data || !res.data.rule) {
+                                var msg = res && res.data && res.data.message ? String(res.data.message) : 'Could not save strict settings.';
+                                statusEl.textContent = msg;
+                                return;
+                            }
+                            strictFieldRules[ruleKey] = res.data.rule;
+                            statusEl.textContent = 'Strict settings saved. Reloading...';
+                            setTimeout(function() {
+                                window.location.reload();
+                            }, 250);
+                        })
+                        .catch(function() {
+                            statusEl.textContent = 'Could not save strict settings.';
+                        })
+                        .finally(function() {
+                            saveBtn.disabled = false;
+                        });
+                });
+            });
         }
         function initAiFieldAssist() {
             if (!aiEnabled || !aiUrl || !aiNonce || !form) return;
@@ -1326,6 +1595,17 @@ if (!$in_theme) : ?>
                     if (tone) instructionParts.push('Global tone: ' + tone);
                     if (instructionText) instructionParts.push(instructionText);
                     if (feedbackText) instructionParts.push('Revision feedback from rejected draft:\n' + feedbackText);
+                    var aiRuleKey = String(rowIndex) + '::' + String(fieldKey);
+                    var aiRule = strictEnabled ? getStrictRule(aiRuleKey) : null;
+                    if (aiRule && aiRule.enabled) {
+                        var strictRules = [];
+                        if (aiRule.enable_required) strictRules.push('required content (must not be empty)');
+                        if (aiRule.enable_min_words && aiRule.min_words > 0) strictRules.push('minimum words: ' + aiRule.min_words);
+                        if (aiRule.enable_max_words && aiRule.max_words > 0) strictRules.push('maximum words: ' + aiRule.max_words);
+                        if (aiRule.enable_min_chars && aiRule.min_chars > 0) strictRules.push('minimum characters: ' + aiRule.min_chars);
+                        if (aiRule.enable_max_chars && aiRule.max_chars > 0) strictRules.push('maximum characters: ' + aiRule.max_chars);
+                        instructionParts.push('Hard constraints: ' + strictRules.join(', ') + '.');
+                    }
                     var mergedInstructions = instructionParts.join('\n\n');
                     inFlight = true;
                     panel.setAttribute('aria-busy', 'true');
@@ -1446,10 +1726,24 @@ if (!$in_theme) : ?>
             if (err) { err.textContent = msg; err.classList.add('matrix-visible'); }
             if (formErrorsList) { var li = document.createElement('li'); li.textContent = summary || msg; formErrorsList.appendChild(li); }
         }
+        function stripHtml(value) {
+            return String(value || '')
+                .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+                .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/&nbsp;/gi, ' ');
+        }
+        function getWordCount(value) {
+            var text = stripHtml(value).replace(/\s+/g, ' ').trim();
+            if (!text) return 0;
+            return text.split(' ').filter(function(token) { return token !== ''; }).length;
+        }
         function validateForm() {
             clearValidation();
             if (!form) return true;
             var invalid = false;
+            var submitMode = submitModeInput ? String(submitModeInput.value || 'publish') : 'publish';
+            var strictApplies = strictEnabled && (!strictEnforcePublishOnly || submitMode !== 'later');
             form.querySelectorAll('[data-matrix-required="1"]').forEach(function(field) {
                 // Avoid blocking submit for untouched legacy content.
                 if (!isFieldChanged(field)) return;
@@ -1468,6 +1762,38 @@ if (!$in_theme) : ?>
                     addError(field, 'Please enter a valid URL (https://, /relative-path, #anchor, mailto:, or tel:).', (field.getAttribute('data-matrix-label') || 'URL') + ' has an invalid URL format.');
                 }
             });
+            if (strictApplies) {
+                form.querySelectorAll('textarea[name^="matrix_field["], input[type="text"][name^="matrix_field["]').forEach(function(field) {
+                    var currentValue = getFieldCurrentValue(field);
+                    var label = field.getAttribute('data-matrix-label') || 'Field';
+                    var ruleKey = getStrictRuleKeyFromField(field);
+                    var rule = getStrictRule(ruleKey);
+                    if (!rule || !rule.enabled) return;
+                    var words = getWordCount(currentValue);
+                    var chars = stripHtml(currentValue).replace(/\s+/g, ' ').trim().length;
+                    if (rule.enable_required && stripHtml(currentValue).replace(/\s+/g, ' ').trim() === '') {
+                        invalid = true;
+                        addError(field, 'This field is required by strict mode.', label + ' is required (strict mode).');
+                        return;
+                    }
+                    if (rule.enable_min_words && rule.min_words > 0 && words < rule.min_words) {
+                        invalid = true;
+                        addError(field, 'Not enough words. Minimum ' + rule.min_words + ', current ' + words + '.', label + ': minimum words ' + rule.min_words + ', current ' + words + '.');
+                    }
+                    if (rule.enable_max_words && rule.max_words > 0 && words > rule.max_words) {
+                        invalid = true;
+                        addError(field, 'Too many words. Maximum ' + rule.max_words + ', current ' + words + '.', label + ': maximum words ' + rule.max_words + ', current ' + words + '.');
+                    }
+                    if (rule.enable_min_chars && rule.min_chars > 0 && chars < rule.min_chars) {
+                        invalid = true;
+                        addError(field, 'Not enough characters. Minimum ' + rule.min_chars + ', current ' + chars + '.', label + ': minimum characters ' + rule.min_chars + ', current ' + chars + '.');
+                    }
+                    if (rule.enable_max_chars && rule.max_chars > 0 && chars > rule.max_chars) {
+                        invalid = true;
+                        addError(field, 'Too many characters. Maximum ' + rule.max_chars + ', current ' + chars + '.', label + ': maximum characters ' + rule.max_chars + ', current ' + chars + '.');
+                    }
+                });
+            }
             if (invalid && formErrorsWrap) {
                 formErrorsWrap.classList.add('matrix-visible');
                 formErrorsWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1797,6 +2123,7 @@ if (!$in_theme) : ?>
         if (autosaveUrl && autosaveNonce && form) {
             setInterval(autosaveDraft, autosaveIntervalMs > 0 ? autosaveIntervalMs : 75000);
         }
+        initStrictFieldAssist();
         initAiFieldAssist();
 
         window.addEventListener('beforeunload', function(e) {

@@ -330,7 +330,7 @@ class Matrix_Export {
      *
      * @param array<int,int|string> $post_ids
      */
-    public static function download_client_links_workbook(array $post_ids) {
+    public static function download_client_links_workbook(array $post_ids, array $link_options = []) {
         $post_ids = array_values(array_unique(array_filter(array_map('intval', $post_ids))));
         if (empty($post_ids)) {
             wp_die('No posts selected. Select at least one page or post, then click "Download client links workbook (.xlsx)".', 'No selection', ['response' => 400]);
@@ -350,7 +350,7 @@ class Matrix_Export {
         }
 
         // One client link (one token) for the whole selection – one form with tabs
-        $token = self::create_client_link($post_ids);
+        $token = self::create_client_link($post_ids, $link_options);
         $base_form_url = self::get_client_link_url($token);
         $status_by_post = self::get_client_link_page_statuses($token, $post_ids);
 
@@ -566,7 +566,7 @@ class Matrix_Export {
     /**
      * Return all saved client links keyed by token.
      *
-     * @return array<string, array{post_ids: array<int,int>, created_at: int, created_by: int, expires_at: int, reminder_days: int, custom_instructions: string, requires_approval: bool}>
+     * @return array<string, array{post_ids: array<int,int>, created_at: int, created_by: int, expires_at: int, reminder_days: int, custom_instructions: string, requires_approval: bool, strict_mode: bool, ai_mode: bool, strict_field_rules: array<string,array{enabled:int,enable_ai_mode:int,enable_required:int,enable_min_words:int,enable_max_words:int,enable_min_chars:int,enable_max_chars:int,min_words:int,max_words:int,min_chars:int,max_chars:int}>}>
      */
     public static function get_client_links() {
         $links = get_option(self::CLIENT_LINKS_OPTION, []);
@@ -587,6 +587,11 @@ class Matrix_Export {
             if (empty($post_ids)) {
                 continue;
             }
+            $default_ai_mode = false;
+            if (function_exists('matrix_export_get_ai_settings')) {
+                $ai_settings = matrix_export_get_ai_settings();
+                $default_ai_mode = !empty($ai_settings['enabled']);
+            }
             $clean[$token] = [
                 'post_ids'    => $post_ids,
                 'created_at'  => isset($entry['created_at']) ? (int) $entry['created_at'] : time(),
@@ -595,6 +600,9 @@ class Matrix_Export {
                 'reminder_days' => isset($entry['reminder_days']) ? max(0, (int) $entry['reminder_days']) : 0,
                 'custom_instructions' => isset($entry['custom_instructions']) ? wp_kses_post((string) $entry['custom_instructions']) : '',
                 'requires_approval' => !empty($entry['requires_approval']),
+                'strict_mode' => !empty($entry['strict_mode']),
+                'ai_mode' => array_key_exists('ai_mode', $entry) ? !empty($entry['ai_mode']) : $default_ai_mode,
+                'strict_field_rules' => self::sanitize_strict_field_rules(isset($entry['strict_field_rules']) && is_array($entry['strict_field_rules']) ? $entry['strict_field_rules'] : []),
             ];
         }
         return $clean;
@@ -604,7 +612,7 @@ class Matrix_Export {
      * Generate and save a unique client link token for selected posts.
      *
      * @param array<int, int|string> $post_ids
-     * @param array{expires_days?: int, reminder_days?: int, custom_instructions?: string, requires_approval?: bool|int|string} $options
+     * @param array{expires_days?: int, reminder_days?: int, custom_instructions?: string, requires_approval?: bool|int|string, strict_mode?: bool|int|string, ai_mode?: bool|int|string} $options
      * @return string Token
      */
     public static function create_client_link(array $post_ids, array $options = []) {
@@ -616,6 +624,13 @@ class Matrix_Export {
         $reminder_days = isset($options['reminder_days']) ? max(0, (int) $options['reminder_days']) : 0;
         $custom_instructions = isset($options['custom_instructions']) ? wp_kses_post((string) $options['custom_instructions']) : '';
         $requires_approval = !empty($options['requires_approval']);
+        $strict_mode = !empty($options['strict_mode']);
+        $default_ai_mode = false;
+        if (function_exists('matrix_export_get_ai_settings')) {
+            $ai_settings = matrix_export_get_ai_settings();
+            $default_ai_mode = !empty($ai_settings['enabled']);
+        }
+        $ai_mode = array_key_exists('ai_mode', $options) ? !empty($options['ai_mode']) : $default_ai_mode;
         $expires_at = $expires_days > 0 ? (time() + ($expires_days * DAY_IN_SECONDS)) : 0;
         $links = self::get_client_links();
         $token = bin2hex(random_bytes(24));
@@ -627,6 +642,9 @@ class Matrix_Export {
             'reminder_days' => $reminder_days,
             'custom_instructions' => $custom_instructions,
             'requires_approval' => $requires_approval,
+            'strict_mode' => $strict_mode,
+            'ai_mode' => $ai_mode,
+            'strict_field_rules' => [],
         ];
         update_option(self::CLIENT_LINKS_OPTION, $links, false);
         return $token;
@@ -736,6 +754,116 @@ class Matrix_Export {
         $links[$token]['requires_approval'] = (bool) $requires_approval;
         update_option(self::CLIENT_LINKS_OPTION, $links, false);
         return true;
+    }
+
+    /**
+     * Update publish/strict/AI modes for an existing client link.
+     *
+     * @param string $token
+     * @param bool $requires_approval
+     * @param bool $strict_mode
+     * @param bool $ai_mode
+     * @return bool
+     */
+    public static function update_client_link_modes($token, $requires_approval, $strict_mode, $ai_mode) {
+        $token = is_string($token) ? strtolower(trim($token)) : '';
+        if ($token === '') {
+            return false;
+        }
+        $links = self::get_client_links();
+        if (!isset($links[$token]) || !is_array($links[$token])) {
+            return false;
+        }
+        $links[$token]['requires_approval'] = (bool) $requires_approval;
+        $links[$token]['strict_mode'] = (bool) $strict_mode;
+        $links[$token]['ai_mode'] = (bool) $ai_mode;
+        update_option(self::CLIENT_LINKS_OPTION, $links, false);
+        return true;
+    }
+
+    /**
+     * Save strict rule for one row+field key on a client link.
+     *
+     * @param string $token
+     * @param string $rule_key
+     * @param array{enabled:int|bool,enable_ai_mode?:int|bool,enable_required?:int|bool,enable_min_words?:int|bool,enable_max_words?:int|bool,enable_min_chars?:int|bool,enable_max_chars?:int|bool,min_words:int,max_words:int,min_chars:int,max_chars:int} $rule
+     * @return bool
+     */
+    public static function update_client_link_strict_field_rule($token, $rule_key, array $rule) {
+        $token = is_string($token) ? strtolower(trim($token)) : '';
+        $rule_key = is_string($rule_key) ? trim($rule_key) : '';
+        if ($token === '' || $rule_key === '' || !preg_match('/^\d+::[A-Za-z0-9_\-]+$/', $rule_key)) {
+            return false;
+        }
+        $links = self::get_client_links();
+        if (!isset($links[$token]) || !is_array($links[$token])) {
+            return false;
+        }
+        $rules = isset($links[$token]['strict_field_rules']) && is_array($links[$token]['strict_field_rules']) ? $links[$token]['strict_field_rules'] : [];
+        $rules[$rule_key] = [
+            'enabled' => !empty($rule['enabled']) ? 1 : 0,
+            'enable_ai_mode' => array_key_exists('enable_ai_mode', $rule) ? (!empty($rule['enable_ai_mode']) ? 1 : 0) : 1,
+            'enable_required' => !empty($rule['enable_required']) ? 1 : 0,
+            'enable_min_words' => !empty($rule['enable_min_words']) ? 1 : 0,
+            'enable_max_words' => !empty($rule['enable_max_words']) ? 1 : 0,
+            'enable_min_chars' => !empty($rule['enable_min_chars']) ? 1 : 0,
+            'enable_max_chars' => !empty($rule['enable_max_chars']) ? 1 : 0,
+            'min_words' => isset($rule['min_words']) ? max(0, (int) $rule['min_words']) : 0,
+            'max_words' => isset($rule['max_words']) ? max(0, (int) $rule['max_words']) : 0,
+            'min_chars' => isset($rule['min_chars']) ? max(0, (int) $rule['min_chars']) : 0,
+            'max_chars' => isset($rule['max_chars']) ? max(0, (int) $rule['max_chars']) : 0,
+        ];
+        $links[$token]['strict_field_rules'] = self::sanitize_strict_field_rules($rules);
+        update_option(self::CLIENT_LINKS_OPTION, $links, false);
+        return true;
+    }
+
+    /**
+     * @param array<string,mixed> $rules
+     * @return array<string,array{enabled:int,min_words:int,max_words:int,min_chars:int,max_chars:int}>
+     */
+    protected static function sanitize_strict_field_rules(array $rules) {
+        $clean = [];
+        foreach ($rules as $rule_key => $rule) {
+            $rule_key = is_string($rule_key) ? trim($rule_key) : '';
+            if ($rule_key === '' || !preg_match('/^\d+::[A-Za-z0-9_\-]+$/', $rule_key)) {
+                continue;
+            }
+            if (!is_array($rule)) {
+                continue;
+            }
+            $enabled = !empty($rule['enabled']) ? 1 : 0;
+            $enable_ai_mode = array_key_exists('enable_ai_mode', $rule) ? (!empty($rule['enable_ai_mode']) ? 1 : 0) : 1;
+            $enable_required = !empty($rule['enable_required']) ? 1 : 0;
+            $enable_min_words = !empty($rule['enable_min_words']) ? 1 : 0;
+            $enable_max_words = !empty($rule['enable_max_words']) ? 1 : 0;
+            $enable_min_chars = !empty($rule['enable_min_chars']) ? 1 : 0;
+            $enable_max_chars = !empty($rule['enable_max_chars']) ? 1 : 0;
+            $min_words = isset($rule['min_words']) ? max(0, (int) $rule['min_words']) : 0;
+            $max_words = isset($rule['max_words']) ? max(0, (int) $rule['max_words']) : 0;
+            $min_chars = isset($rule['min_chars']) ? max(0, (int) $rule['min_chars']) : 0;
+            $max_chars = isset($rule['max_chars']) ? max(0, (int) $rule['max_chars']) : 0;
+            if ($max_words > 0 && $min_words > 0 && $max_words < $min_words) {
+                $max_words = $min_words;
+            }
+            if ($max_chars > 0 && $min_chars > 0 && $max_chars < $min_chars) {
+                $max_chars = $min_chars;
+            }
+            $clean[$rule_key] = [
+                'enabled' => $enabled,
+                'enable_ai_mode' => $enable_ai_mode,
+                'enable_required' => $enable_required,
+                'enable_min_words' => $enable_min_words,
+                'enable_max_words' => $enable_max_words,
+                'enable_min_chars' => $enable_min_chars,
+                'enable_max_chars' => $enable_max_chars,
+                'min_words' => $min_words,
+                'max_words' => $max_words,
+                'min_chars' => $min_chars,
+                'max_chars' => $max_chars,
+            ];
+        }
+        return $clean;
     }
 
     /**

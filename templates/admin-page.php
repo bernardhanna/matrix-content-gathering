@@ -41,6 +41,18 @@ $ai_gemini_key_set = !empty($ai_settings['gemini_api_key']);
 $runtime_settings = isset($runtime_settings) && is_array($runtime_settings) ? $runtime_settings : (function_exists('matrix_export_get_runtime_settings') ? matrix_export_get_runtime_settings() : []);
 $runtime_node_binary = isset($runtime_settings['node_binary']) ? (string) $runtime_settings['node_binary'] : '';
 $runtime_playwright_browsers_path = isset($runtime_settings['playwright_browsers_path']) ? (string) $runtime_settings['playwright_browsers_path'] : '';
+$strict_settings = isset($strict_settings) && is_array($strict_settings) ? $strict_settings : (function_exists('matrix_export_get_strict_settings') ? matrix_export_get_strict_settings() : []);
+$strict_super_admin_user_id = isset($strict_settings['super_admin_user_id']) ? (int) $strict_settings['super_admin_user_id'] : 0;
+$strict_default_min_words = isset($strict_settings['default_min_words']) ? (int) $strict_settings['default_min_words'] : 0;
+$strict_default_min_chars = isset($strict_settings['default_min_chars']) ? (int) $strict_settings['default_min_chars'] : 0;
+$strict_enforce_publish_only = isset($strict_settings['enforce_publish_only']) ? !empty($strict_settings['enforce_publish_only']) : true;
+$strict_enable_spellcheck = !empty($strict_settings['enable_spellcheck']);
+$strict_admin_users = function_exists('get_users') ? get_users([
+    'role__in' => ['administrator'],
+    'orderby' => 'display_name',
+    'order' => 'ASC',
+    'fields' => ['ID', 'display_name', 'user_email'],
+]) : [];
 $all_form_field_keys = Matrix_Export::get_all_content_field_keys();
 $form_field_post_types_map = Matrix_Export::get_content_field_key_post_types_map();
 $disabled_form_field_keys = Matrix_Export::get_disabled_form_fields();
@@ -287,6 +299,18 @@ foreach ($all_posts as $post) {
                     Require approval before publishing (off by default)
                 </label>
             </p>
+            <p style="margin: 0.35rem 0;">
+                <label>
+                    <input type="checkbox" name="matrix_client_strict_mode" value="1" />
+                    Enable strict mode for this form/workbook (off by default)
+                </label>
+            </p>
+            <p style="margin: 0.35rem 0;">
+                <label>
+                    <input type="checkbox" name="matrix_client_ai_mode" value="1" <?php checked($ai_enabled); ?> />
+                    Enable AI mode for this form/workbook
+                </label>
+            </p>
             <p class="description" style="margin-top: 0;">Use 0 to disable. Expiry blocks form access after the selected number of days.</p>
             <p style="margin: 0.5rem 0 0.25rem;"><strong>Custom instructions for this link (optional)</strong></p>
             <p style="margin-top: 0;">
@@ -331,7 +355,9 @@ foreach ($all_posts as $post) {
                         <th>Expiry / Reminder</th>
                         <th>Instructions</th>
                         <th>Publish mode</th>
-                        <th style="width: 260px;">Action</th>
+                        <th>Strict mode</th>
+                        <th>AI mode</th>
+                        <th style="width: 320px;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -355,6 +381,8 @@ foreach ($all_posts as $post) {
                     $mailto_row_url = 'mailto:?subject=' . rawurlencode('Content editing link') . '&body=' . rawurlencode("Hi,\n\nPlease use this link to review and update content:\n" . $link_url . "\n");
                     $instructions_preview = isset($entry['custom_instructions']) ? wp_strip_all_tags((string) $entry['custom_instructions']) : '';
                     $requires_approval = !empty($entry['requires_approval']);
+                    $strict_mode = !empty($entry['strict_mode']);
+                    $ai_mode = array_key_exists('ai_mode', (array) $entry) ? !empty($entry['ai_mode']) : $ai_enabled;
                 ?>
                     <tr>
                         <td><?php echo $created_at > 0 ? esc_html(wp_date('Y-m-d H:i', $created_at)) : '—'; ?></td>
@@ -372,10 +400,12 @@ foreach ($all_posts as $post) {
                         </td>
                         <td><?php echo $instructions_preview !== '' ? esc_html(function_exists('mb_substr') ? mb_substr($instructions_preview, 0, 120) : substr($instructions_preview, 0, 120)) . (strlen($instructions_preview) > 120 ? '…' : '') : '—'; ?></td>
                         <td><?php echo $requires_approval ? '<strong>Needs approval</strong>' : 'Publish on submit'; ?></td>
+                        <td><?php echo $strict_mode ? '<strong>Enabled</strong>' : 'Off'; ?></td>
+                        <td><?php echo $ai_mode ? '<strong>Enabled</strong>' : 'Off'; ?></td>
                         <td>
-                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                                 <a class="button button-small" href="<?php echo esc_url($mailto_row_url); ?>">Email link</a>
-                                <form method="post" style="margin:0; display:flex; gap:6px; align-items:center;">
+                                <form method="post" style="margin:0; display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:6px; border:1px solid #dcdcde; border-radius:4px; background:#fff;">
                                     <?php wp_nonce_field('matrix_client_links_action', 'matrix_client_links_action_nonce'); ?>
                                     <input type="hidden" name="matrix_client_links_action" value="update_mode" />
                                     <input type="hidden" name="matrix_client_link_token" value="<?php echo esc_attr($token); ?>" />
@@ -383,7 +413,15 @@ foreach ($all_posts as $post) {
                                         <option value="publish" <?php selected(!$requires_approval); ?>>Publish on submit</option>
                                         <option value="approval" <?php selected($requires_approval); ?>>Needs approval</option>
                                     </select>
-                                    <button type="submit" class="button button-small">Save mode</button>
+                                    <label style="display:inline-flex; align-items:center; gap:4px;">
+                                        <input type="checkbox" name="matrix_client_link_strict_mode" value="1" <?php checked($strict_mode); ?> />
+                                        Strict
+                                    </label>
+                                    <label style="display:inline-flex; align-items:center; gap:4px;">
+                                        <input type="checkbox" name="matrix_client_link_ai_mode" value="1" <?php checked($ai_mode); ?> />
+                                        AI
+                                    </label>
+                                    <button type="submit" class="button button-small button-primary">Save settings</button>
                                 </form>
                                 <form method="post" style="margin:0;">
                                     <?php wp_nonce_field('matrix_client_links_action', 'matrix_client_links_action_nonce'); ?>
@@ -535,6 +573,31 @@ foreach ($all_posts as $post) {
                     <?php endif; ?>
                 </p>
                 <p class="description" style="margin-top:0.25rem;">API keys are stored in WordPress options. Users still review and accept/reject generated output before saving.</p>
+
+                <hr />
+                <p style="margin: 12px 0 6px 0;"><strong>Strict mode defaults (admin)</strong></p>
+                <p style="margin-top: 0.35rem;">
+                    <label style="display:block;">Super admin reviewer user (optional)</label>
+                    <select name="matrix_strict_super_admin_user_id" style="min-width: 420px;">
+                        <option value="0">Not set</option>
+                        <?php foreach ($strict_admin_users as $admin_user) : ?>
+                            <option value="<?php echo (int) $admin_user->ID; ?>" <?php selected($strict_super_admin_user_id, (int) $admin_user->ID); ?>>
+                                <?php echo esc_html($admin_user->display_name . ' (' . $admin_user->user_email . ')'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <span class="description" style="display:block;">Used as fallback moderation notification recipient if no review email is configured.</span>
+                </p>
+                <p class="description" style="margin: 0.5rem 0;">
+                    Min/max word and character rules are now configured per content field from the strict settings cog on each field in the form.
+                </p>
+                <p style="margin: 0.35rem 0;">
+                    <label><input type="checkbox" name="matrix_strict_enforce_publish_only" value="1" <?php checked($strict_enforce_publish_only); ?> /> Enforce these rules only on publish/submit (allow Save for later)</label>
+                </p>
+                <p style="margin: 0.35rem 0;">
+                    <label><input type="checkbox" name="matrix_strict_enable_spellcheck" value="1" <?php checked($strict_enable_spellcheck); ?> /> Enable browser spellcheck on text inputs/areas in client form</label>
+                </p>
+                <p class="description" style="margin-top: 0.25rem;">Strict mode enablement is per form/workbook at link creation time. These values are the default rules used when strict mode is enabled.</p>
 
                 <p style="margin: 12px 0 6px 0;"><strong>Screenshot runtime paths (optional)</strong></p>
                 <p style="margin-top: 0;">

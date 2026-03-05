@@ -24,6 +24,7 @@ define('MATRIX_EXPORT_DISABLED_BLOCKS_OPTION', 'matrix_export_disabled_blocks');
 define('MATRIX_EXPORT_PENDING_REVIEWS_OPTION', 'matrix_export_pending_reviews');
 define('MATRIX_EXPORT_AI_SETTINGS_OPTION', 'matrix_export_ai_settings');
 define('MATRIX_EXPORT_RUNTIME_SETTINGS_OPTION', 'matrix_export_runtime_settings');
+define('MATRIX_EXPORT_STRICT_SETTINGS_OPTION', 'matrix_export_strict_settings');
 /** Max size for image uploads in the client form (bytes). Default 2 MB. */
 define('MATRIX_EXPORT_MAX_IMAGE_UPLOAD_BYTES', 2 * 1024 * 1024);
 /** Max size for video uploads in the client form (bytes). Default 30 MB. */
@@ -45,6 +46,7 @@ add_action('wp_ajax_matrix_export_autosave_draft', 'matrix_export_ajax_autosave_
 add_action('wp_ajax_matrix_export_duplicate_page', 'matrix_export_ajax_duplicate_page');
 add_action('wp_ajax_matrix_export_get_fields_for_posts', 'matrix_export_ajax_get_fields_for_posts');
 add_action('wp_ajax_matrix_export_ai_generate_block', 'matrix_export_ajax_ai_generate_block');
+add_action('wp_ajax_matrix_export_save_strict_rule', 'matrix_export_ajax_save_strict_rule');
 add_action('wp_enqueue_scripts', 'matrix_export_content_editing_scripts', 5);
 add_filter('manage_pages_columns', 'matrix_export_add_status_column');
 add_filter('manage_posts_columns', 'matrix_export_add_status_column');
@@ -219,7 +221,9 @@ function matrix_export_handle_actions() {
             $token = sanitize_text_field(wp_unslash($_POST['matrix_client_link_token']));
             $mode = isset($_POST['matrix_client_link_mode']) ? sanitize_key(wp_unslash($_POST['matrix_client_link_mode'])) : 'publish';
             $requires_approval = ($mode === 'approval');
-            $ok = Matrix_Export::update_client_link_requires_approval($token, $requires_approval);
+            $strict_mode = !empty($_POST['matrix_client_link_strict_mode']);
+            $ai_mode = !empty($_POST['matrix_client_link_ai_mode']);
+            $ok = Matrix_Export::update_client_link_modes($token, $requires_approval, $strict_mode, $ai_mode);
             wp_safe_redirect(add_query_arg([
                 'matrix_client_mode_updated' => $ok ? '1' : '0',
             ], wp_get_referer()));
@@ -371,6 +375,35 @@ function matrix_export_handle_actions() {
             $ai_settings['gemini_api_key'] = '';
         }
         update_option(MATRIX_EXPORT_AI_SETTINGS_OPTION, $ai_settings, false);
+        if (
+            isset($_POST['matrix_strict_super_admin_user_id']) ||
+            isset($_POST['matrix_strict_default_min_words']) ||
+            isset($_POST['matrix_strict_default_min_chars']) ||
+            isset($_POST['matrix_strict_enforce_publish_only']) ||
+            isset($_POST['matrix_strict_enable_spellcheck'])
+        ) {
+            $strict_settings = [
+                'super_admin_user_id' => isset($_POST['matrix_strict_super_admin_user_id']) ? (int) $_POST['matrix_strict_super_admin_user_id'] : 0,
+                'default_min_words' => isset($_POST['matrix_strict_default_min_words']) ? max(0, (int) $_POST['matrix_strict_default_min_words']) : 0,
+                'default_min_chars' => isset($_POST['matrix_strict_default_min_chars']) ? max(0, (int) $_POST['matrix_strict_default_min_chars']) : 0,
+                'enforce_publish_only' => !empty($_POST['matrix_strict_enforce_publish_only']) ? 1 : 0,
+                'enable_spellcheck' => !empty($_POST['matrix_strict_enable_spellcheck']) ? 1 : 0,
+            ];
+            if ($strict_settings['super_admin_user_id'] > 0 && !get_userdata($strict_settings['super_admin_user_id'])) {
+                $strict_settings['super_admin_user_id'] = 0;
+            }
+            if (
+                $strict_settings['super_admin_user_id'] <= 0 &&
+                $strict_settings['default_min_words'] <= 0 &&
+                $strict_settings['default_min_chars'] <= 0 &&
+                empty($strict_settings['enforce_publish_only']) &&
+                empty($strict_settings['enable_spellcheck'])
+            ) {
+                delete_option(MATRIX_EXPORT_STRICT_SETTINGS_OPTION);
+            } else {
+                update_option(MATRIX_EXPORT_STRICT_SETTINGS_OPTION, $strict_settings, false);
+            }
+        }
         if (!empty($_POST['matrix_settings_submit']) && (string) wp_unslash($_POST['matrix_settings_submit']) === '1') {
             $back = wp_get_referer();
             if (!is_string($back) || $back === '') {
@@ -389,11 +422,15 @@ function matrix_export_handle_actions() {
             $reminder_days = isset($_POST['matrix_client_link_reminder_days']) ? max(0, (int) $_POST['matrix_client_link_reminder_days']) : 0;
             $custom_instructions = isset($_POST['matrix_client_custom_instructions']) ? wp_kses_post(wp_unslash((string) $_POST['matrix_client_custom_instructions'])) : '';
             $requires_approval = !empty($_POST['matrix_client_requires_approval']);
+            $strict_mode = !empty($_POST['matrix_client_strict_mode']);
+            $ai_mode = !empty($_POST['matrix_client_ai_mode']);
             $token = Matrix_Export::create_client_link($post_ids, [
                 'expires_days' => $expires_days,
                 'reminder_days' => $reminder_days,
                 'custom_instructions' => $custom_instructions,
                 'requires_approval' => $requires_approval,
+                'strict_mode' => $strict_mode,
+                'ai_mode' => $ai_mode,
             ]);
             if ($token !== '') {
                 $redirect = add_query_arg(
@@ -412,7 +449,12 @@ function matrix_export_handle_actions() {
                 wp_safe_redirect(add_query_arg('matrix_export_error', 'excel_no_selection', wp_get_referer()));
                 exit;
             }
-            Matrix_Export::download_client_links_workbook($post_ids);
+            $strict_mode = !empty($_POST['matrix_client_strict_mode']);
+            $ai_mode = !empty($_POST['matrix_client_ai_mode']);
+            Matrix_Export::download_client_links_workbook($post_ids, [
+                'strict_mode' => $strict_mode,
+                'ai_mode' => $ai_mode,
+            ]);
             exit;
         }
         if ($format !== 'client_link' && !empty($post_ids)) {
@@ -732,6 +774,25 @@ function matrix_export_get_runtime_settings() {
     return [
         'node_binary' => isset($raw['node_binary']) ? trim((string) $raw['node_binary']) : '',
         'playwright_browsers_path' => isset($raw['playwright_browsers_path']) ? trim((string) $raw['playwright_browsers_path']) : '',
+    ];
+}
+
+/**
+ * Strict mode settings for client form guardrails.
+ *
+ * @return array{super_admin_user_id:int,default_min_words:int,default_min_chars:int,enforce_publish_only:int,enable_spellcheck:int}
+ */
+function matrix_export_get_strict_settings() {
+    $raw = get_option(MATRIX_EXPORT_STRICT_SETTINGS_OPTION, []);
+    if (!is_array($raw)) {
+        $raw = [];
+    }
+    return [
+        'super_admin_user_id' => isset($raw['super_admin_user_id']) ? max(0, (int) $raw['super_admin_user_id']) : 0,
+        'default_min_words' => isset($raw['default_min_words']) ? max(0, (int) $raw['default_min_words']) : 0,
+        'default_min_chars' => isset($raw['default_min_chars']) ? max(0, (int) $raw['default_min_chars']) : 0,
+        'enforce_publish_only' => isset($raw['enforce_publish_only']) ? (!empty($raw['enforce_publish_only']) ? 1 : 0) : 1,
+        'enable_spellcheck' => !empty($raw['enable_spellcheck']) ? 1 : 0,
     ];
 }
 
@@ -1174,6 +1235,64 @@ function matrix_export_ajax_ai_generate_block() {
 }
 
 /**
+ * AJAX: save strict mode rule for a specific form field instance.
+ */
+function matrix_export_ajax_save_strict_rule() {
+    if (!is_user_logged_in() || !matrix_export_user_can_access_client_form()) {
+        wp_send_json_error(['message' => 'Forbidden'], 403);
+    }
+    if (!isset($_POST['matrix_strict_rule_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['matrix_strict_rule_nonce'])), 'matrix_export_save_strict_rule')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 400);
+    }
+    $strict_settings = matrix_export_get_strict_settings();
+    $super_admin_user_id = isset($strict_settings['super_admin_user_id']) ? (int) $strict_settings['super_admin_user_id'] : 0;
+    $current_user_id = (int) get_current_user_id();
+    $can_manage = false;
+    if ($super_admin_user_id > 0) {
+        $can_manage = ($current_user_id === $super_admin_user_id);
+    } else {
+        $can_manage = current_user_can('manage_options');
+    }
+    if (!$can_manage) {
+        wp_send_json_error(['message' => 'Only the configured super admin can edit strict field rules.'], 403);
+    }
+
+    $token = isset($_POST['matrix_form_token']) ? sanitize_text_field(wp_unslash($_POST['matrix_form_token'])) : '';
+    $entry = Matrix_Export::get_client_link_entry($token, true);
+    if (empty($entry) || empty($entry['strict_mode'])) {
+        wp_send_json_error(['message' => 'Strict mode is not enabled for this form.'], 400);
+    }
+    $rule_key = isset($_POST['rule_key']) ? sanitize_text_field(wp_unslash($_POST['rule_key'])) : '';
+    if ($rule_key === '' || !preg_match('/^\d+::[A-Za-z0-9_\-]+$/', $rule_key)) {
+        wp_send_json_error(['message' => 'Invalid field rule key.'], 400);
+    }
+    $rule = [
+        'enabled' => !empty($_POST['enabled']) ? 1 : 0,
+        'enable_ai_mode' => array_key_exists('enable_ai_mode', $_POST) ? (!empty($_POST['enable_ai_mode']) ? 1 : 0) : 1,
+        'enable_required' => !empty($_POST['enable_required']) ? 1 : 0,
+        'enable_min_words' => !empty($_POST['enable_min_words']) ? 1 : 0,
+        'enable_max_words' => !empty($_POST['enable_max_words']) ? 1 : 0,
+        'enable_min_chars' => !empty($_POST['enable_min_chars']) ? 1 : 0,
+        'enable_max_chars' => !empty($_POST['enable_max_chars']) ? 1 : 0,
+        'min_words' => isset($_POST['min_words']) ? max(0, (int) $_POST['min_words']) : 0,
+        'max_words' => isset($_POST['max_words']) ? max(0, (int) $_POST['max_words']) : 0,
+        'min_chars' => isset($_POST['min_chars']) ? max(0, (int) $_POST['min_chars']) : 0,
+        'max_chars' => isset($_POST['max_chars']) ? max(0, (int) $_POST['max_chars']) : 0,
+    ];
+    if ($rule['max_words'] > 0 && $rule['min_words'] > 0 && $rule['max_words'] < $rule['min_words']) {
+        wp_send_json_error(['message' => 'Max words must be greater than or equal to min words.'], 400);
+    }
+    if ($rule['max_chars'] > 0 && $rule['min_chars'] > 0 && $rule['max_chars'] < $rule['min_chars']) {
+        wp_send_json_error(['message' => 'Max characters must be greater than or equal to min characters.'], 400);
+    }
+    $ok = Matrix_Export::update_client_link_strict_field_rule($token, $rule_key, $rule);
+    if (!$ok) {
+        wp_send_json_error(['message' => 'Could not save strict rule.'], 500);
+    }
+    wp_send_json_success(['rule_key' => $rule_key, 'rule' => $rule]);
+}
+
+/**
  * Get pending moderated submissions keyed by submission ID.
  *
  * @return array<string, array<string,mixed>>
@@ -1320,6 +1439,16 @@ function matrix_export_send_pending_review_notification(array $submission) {
     $to = sanitize_email((string) get_option(MATRIX_EXPORT_REVIEW_NOTIFY_EMAIL_OPTION, ''));
     if ($to === '' || !is_email($to)) {
         $to = sanitize_email((string) get_option(MATRIX_EXPORT_NOTIFY_EMAIL_OPTION, ''));
+    }
+    if ($to === '' || !is_email($to)) {
+        $strict_settings = matrix_export_get_strict_settings();
+        $admin_user_id = isset($strict_settings['super_admin_user_id']) ? (int) $strict_settings['super_admin_user_id'] : 0;
+        if ($admin_user_id > 0) {
+            $admin_user = get_userdata($admin_user_id);
+            if ($admin_user && !empty($admin_user->user_email)) {
+                $to = sanitize_email((string) $admin_user->user_email);
+            }
+        }
     }
     if ($to === '' || !is_email($to)) {
         return;
@@ -1737,6 +1866,7 @@ function matrix_export_render_page() {
     $ai_settings = matrix_export_get_ai_settings();
     $runtime_settings = matrix_export_get_runtime_settings();
     $pending_reviews = matrix_export_get_pending_reviews();
+    $strict_settings = matrix_export_get_strict_settings();
     uasort($client_links, function ($a, $b) {
         $a_created = isset($a['created_at']) ? (int) $a['created_at'] : 0;
         $b_created = isset($b['created_at']) ? (int) $b['created_at'] : 0;

@@ -5,6 +5,14 @@
  */
 if (!defined('ABSPATH')) exit;
 
+// Ensure editor/media assets are available in this custom frontend template.
+if (function_exists('wp_enqueue_editor')) {
+    wp_enqueue_editor();
+}
+if (function_exists('wp_enqueue_media')) {
+    wp_enqueue_media();
+}
+
 $token = isset($_GET['matrix_token']) ? sanitize_text_field(wp_unslash($_GET['matrix_token'])) : '';
 $post_ids = Matrix_Export::get_client_link_post_ids($token);
 $link_entry = Matrix_Export::get_client_link_entry($token, true);
@@ -39,8 +47,19 @@ $data['matrix_duplicate_page_ajax_url'] = admin_url('admin-ajax.php');
 $data['matrix_duplicate_page_nonce'] = wp_create_nonce('matrix_export_duplicate_page');
 $data['matrix_ai_generate_ajax_url'] = admin_url('admin-ajax.php');
 $data['matrix_ai_generate_nonce'] = wp_create_nonce('matrix_export_ai_generate_block');
+$data['matrix_strict_rule_save_ajax_url'] = admin_url('admin-ajax.php');
+$data['matrix_strict_rule_save_nonce'] = wp_create_nonce('matrix_export_save_strict_rule');
 $ai_settings = function_exists('matrix_export_get_ai_settings') ? matrix_export_get_ai_settings() : ['enabled' => 0];
-$data['matrix_ai_enabled'] = !empty($ai_settings['enabled']);
+$client_ai_mode = array_key_exists('ai_mode', (array) $link_entry) ? !empty($link_entry['ai_mode']) : !empty($ai_settings['enabled']);
+$data['matrix_ai_enabled'] = !empty($ai_settings['enabled']) && $client_ai_mode;
+$data['client_ai_mode'] = $client_ai_mode;
+$strict_settings = function_exists('matrix_export_get_strict_settings') ? matrix_export_get_strict_settings() : [];
+$data['matrix_strict_settings'] = $strict_settings;
+$data['client_strict_mode'] = !empty($link_entry['strict_mode']);
+$data['strict_field_rules'] = isset($link_entry['strict_field_rules']) && is_array($link_entry['strict_field_rules']) ? $link_entry['strict_field_rules'] : [];
+$super_admin_user_id = isset($strict_settings['super_admin_user_id']) ? (int) $strict_settings['super_admin_user_id'] : 0;
+$current_user_id = (int) get_current_user_id();
+$data['strict_can_configure'] = $super_admin_user_id > 0 ? ($current_user_id === $super_admin_user_id) : current_user_can('manage_options');
 $data['client_link_expires_at'] = isset($link_entry['expires_at']) ? (int) $link_entry['expires_at'] : 0;
 $data['client_link_reminder_days'] = isset($link_entry['reminder_days']) ? (int) $link_entry['reminder_days'] : 0;
 $data['client_link_created_at'] = isset($link_entry['created_at']) ? (int) $link_entry['created_at'] : 0;
